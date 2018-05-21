@@ -1,0 +1,45 @@
+# Cache.rs
+
+I've been toying around with the idea of implementing a low & predictable latency caching library in Rust for a while.
+It's interesting to me from a couple of perspectives: having low-level control over memory layout, while honouring
+Rust's type system and its guarantees; as well as trying to reconcile the efficiency guarantees, with that level of
+control, and possibly supporting pluggable eviction algorithms while not hurting performance. The latter I actually
+think isn't possible: i.e. some sacrifice on the design side on the altar of performance will forever be required,
+which will come at odds with the pluggable eviction. But I still would like to toy with the challenge.
+
+## Initial features
+
+- Cache through API
+- Once-and-only-once loading
+- Clock eviction
+- Thread-safe, with interior mutability
+- Fine(r) grained locking (i.e. don't lock the entire Cache/Segment on populating, as populating could take a while)
+
+## Implementation details
+
+The key part in this _I think_, but that's the point behind the whole project, is to be able to walk the clock hand in
+a CPU cache friendly way. Probably requiring the clock bit information to be held in a different data structure than
+the cache entries themselves. This will come at a slight overhead on cache hits to update the bit.
+
+The other interesting part is making this work in an optimistic way with regards to coordination primitives. Hence the
+idea to use interior mutability for cache entries, but fall to different strategies for the eviction data; possibly
+lowering the guarantees for these.
+
+Finally, trying to plug another eviction algorithm (probably LRU, which requires a different approach to storing the
+eviction data) and see how that affects the design.
+
+### Raw API idea
+
+.api.rs
+[source,rust]
+----
+let cache = Cachers::create(size); // <1>
+let value = cache.get(key, populating_fn); // <2>
+cache.udpate(key, populating_fn); // <3>
+cache.remove(key); // <4>
+----
+<1> `cache` is not `mut`, and `<K, V>` is inferred; the cache would contain at most `size` entries;
+<2> `key` in this case would be a miss, invoking `populating_fn` only once, whether `cache` is shared across multiple
+threads or not. `populating_fn` would return the `value: V` to populate entry for `key: K`.
+<3> `udpate` forces an update to the `key`, whether it was present or not.
+<4> `remove` invalidates the mapping to `key` without proposing a new value.

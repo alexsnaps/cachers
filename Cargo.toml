@@ -1,0 +1,6 @@
+[package]
+name = "cachers"
+version = "0.0.1"
+authors = ["Alex Snaps <alex.snaps@gmail.com>"]
+
+[dependencies]
