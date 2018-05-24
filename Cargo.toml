@@ -2,5 +2,12 @@
 name = "cachers"
 version = "0.0.1"
 authors = ["Alex Snaps <alex.snaps@gmail.com>"]
+license = "Apache-2.0"
+keywords = ["cache"]
+repository = "https://github.com/alexsnaps/cachers"
+readme = "README.adoc"
+homepage = "https://github.com/alexsnaps/cachers"
+documentation = "https://docs.rs/raft"
+description = "A caching library"
 
 [dependencies]
