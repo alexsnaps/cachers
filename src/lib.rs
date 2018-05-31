@@ -18,16 +18,18 @@ use std::collections::hash_map::Entry;
 use std::ops::Fn;
 use std::sync::{Arc, RwLock};
 
-pub struct Cachers<K, V> {
+pub struct CacheThrough<K, V> {
+  capacity: usize,
   data: RwLock<HashMap<K, Arc<V>>>,
 }
 
-impl<K, V> Cachers<K, V>
+impl<K, V> CacheThrough<K, V>
   where K: std::cmp::Eq + std::hash::Hash,
 {
-  pub fn new() -> Cachers<K, V>
+  pub fn new(capacity: usize) -> CacheThrough<K, V>
   {
-    Cachers {
+    CacheThrough {
+      capacity,
       data: RwLock::new(HashMap::new()),
     }
   }
@@ -35,40 +37,55 @@ impl<K, V> Cachers<K, V>
   pub fn get<F>(&self, key: K, populating_fn: F) -> Option<Arc<V>>
     where F: Fn(&K) -> Option<V>,
   {
-    match self.data.write().unwrap().entry(key) {
-      Entry::Occupied(entry) => {
-        Some(entry.get().clone())
-      }
+    let mut entry_added = false;
+    let option = match self.data.write().unwrap().entry(key) {
+      Entry::Occupied(entry) => Some(entry.get().clone()),
       Entry::Vacant(entry) => {
-        insert_if_value(populating_fn(entry.key()), entry)
-      }
+        let option = insert_if_value(populating_fn(entry.key()), entry);
+        entry_added = option.is_some();
+        option
+      },
+    };
+
+    if entry_added && self.len() > self.capacity {
+      self.evict();
     }
+    option
   }
 
   pub fn update<F>(&self, key: K, updating_fn: F) -> Option<Arc<V>>
     where F: Fn(&K, Option<Arc<V>>) -> Option<V>,
   {
-    match self.data.write().unwrap().entry(key) {
+    let mut entry_added = false;
+    let option = match self.data.write().unwrap().entry(key) {
       Entry::Occupied(mut entry) => {
         match updating_fn(entry.key(), Some(entry.get().clone())) {
           Some(value) => {
+            entry_added = true;
             entry.insert(Arc::new(value));
             Some(entry.get().clone())
-          },
+          }
           None => {
             entry.remove();
             None
           }
         }
       }
-      Entry::Vacant(entry) => {
-        insert_if_value(updating_fn(entry.key(), None), entry)
-      }
+      Entry::Vacant(entry) => insert_if_value(updating_fn(entry.key(), None), entry),
+    };
+
+    if entry_added && self.len() > self.capacity {
+      self.evict();
     }
+    option
   }
 
   fn len(&self) -> usize {
     self.data.read().unwrap().len()
+  }
+
+  fn evict(&self) {
+    panic!("WAIT! WHAT?!... No!")
   }
 }
 
@@ -86,12 +103,16 @@ fn insert_if_value<K, V>(value: Option<V>, entry: hash_map::VacantEntry<K, Arc<V
 
 #[cfg(test)]
 mod tests {
-  use super::Cachers;
+  use super::CacheThrough;
   use std::sync::Arc;
+
+  fn test_cache() -> CacheThrough<i32, String> {
+    CacheThrough::new(3)
+  }
 
   #[test]
   fn hit_populates() {
-    let cache: Cachers<i32, String> = Cachers::new();
+    let cache: CacheThrough<i32, String> = test_cache();
     let our_key = 42;
     {
       let value = cache.get(our_key, populate);
@@ -108,7 +129,7 @@ mod tests {
 
   #[test]
   fn miss_populates_not() {
-    let cache: Cachers<i32, String> = Cachers::new();
+    let cache: CacheThrough<i32, String> = test_cache();
     let our_key = 42;
     {
       let value = cache.get(our_key, miss);
@@ -120,12 +141,15 @@ mod tests {
       let value = cache.get(our_key, populate);
       assert_eq!(*value.unwrap(), "42");
       assert_eq!(cache.len(), 1);
+      cache.get(2, populate);
+      cache.get(3, populate);
+      cache.get(4, populate); // todo: don't panic, evict!!!
     }
   }
 
   #[test]
   fn update_populates() {
-    let cache: Cachers<i32, String> = Cachers::new();
+    let cache: CacheThrough<i32, String> = test_cache();
     let our_key = 42;
 
     {
@@ -143,7 +167,7 @@ mod tests {
 
   #[test]
   fn update_updates() {
-    let cache: Cachers<i32, String> = Cachers::new();
+    let cache: CacheThrough<i32, String> = test_cache();
     let our_key = 42;
 
     {
@@ -167,7 +191,7 @@ mod tests {
 
   #[test]
   fn update_removes() {
-    let cache: Cachers<i32, String> = Cachers::new();
+    let cache: CacheThrough<i32, String> = test_cache();
     let our_key = 42;
 
     {
