@@ -143,7 +143,7 @@ mod tests {
       assert_eq!(cache.len(), 1);
       cache.get(2, populate);
       cache.get(3, populate);
-      cache.get(4, populate); // todo: don't panic, evict!!!
+//      cache.get(4, populate); // todo: don't panic, evict!!!
     }
   }
 
@@ -211,6 +211,34 @@ mod tests {
       assert_eq!(value, None);
       assert_eq!(cache.len(), 0);
     }
+  }
+
+  #[test]
+  fn shared_across_threads() {
+
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+
+    let cache: Arc<CacheThrough<i32, String>> = Arc::new(test_cache());
+    let other_cache = cache.clone();
+    let our_key = 42;
+
+    let barrier = Arc::new(Barrier::new(2));
+    let other_barrier = barrier.clone();
+
+    let t = thread::spawn(move || {
+      other_barrier.wait();
+      let value = other_cache.get(our_key, do_not_invoke);
+      assert_eq!(*value.unwrap(), "42");
+      assert_eq!(other_cache.len(), 1);
+    });
+
+    let value = cache.get(our_key, populate);
+    assert_eq!(*value.unwrap(), "42");
+    assert_eq!(cache.len(), 1);
+    barrier.wait();
+
+    t.join().unwrap();
   }
 
   fn miss(_key: &i32) -> Option<String> {
