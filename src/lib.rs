@@ -37,46 +37,45 @@ impl<K, V> CacheThrough<K, V>
   pub fn get<F>(&self, key: K, populating_fn: F) -> Option<Arc<V>>
     where F: Fn(&K) -> Option<V>,
   {
-    let mut entry_added = false;
-    let option = match self.data.write().unwrap().entry(key) {
-      Entry::Occupied(entry) => Some(entry.get().clone()),
-      Entry::Vacant(entry) => {
-        let option = insert_if_value(populating_fn(entry.key()), entry);
-        entry_added = option.is_some();
-        option
-      },
+    if let Some(value) = self.data.read().unwrap().get(&key) {
+      return Some(value.clone());
+    }
+
+    let (entry_was_present, option) = match self.data.write().unwrap().entry(key) {
+      Entry::Occupied(entry) => (true, Some(entry.get().clone())),
+      Entry::Vacant(entry) => (false, insert_if_value(populating_fn(entry.key()), entry)),
     };
 
-    if entry_added && self.len() > self.capacity {
+    if !entry_was_present && option.is_some() && self.len() > self.capacity {
       self.evict();
     }
+
     option
   }
 
   pub fn update<F>(&self, key: K, updating_fn: F) -> Option<Arc<V>>
     where F: Fn(&K, Option<Arc<V>>) -> Option<V>,
   {
-    let mut entry_added = false;
-    let option = match self.data.write().unwrap().entry(key) {
+    let (entry_was_present, option) = match self.data.write().unwrap().entry(key) {
       Entry::Occupied(mut entry) => {
         match updating_fn(entry.key(), Some(entry.get().clone())) {
           Some(value) => {
-            entry_added = true;
             entry.insert(Arc::new(value));
-            Some(entry.get().clone())
+            (true, Some(entry.get().clone()))
           }
           None => {
             entry.remove();
-            None
+            (false, None)
           }
         }
       }
-      Entry::Vacant(entry) => insert_if_value(updating_fn(entry.key(), None), entry),
+      Entry::Vacant(entry) => (false, insert_if_value(updating_fn(entry.key(), None), entry)),
     };
 
-    if entry_added && self.len() > self.capacity {
+    if !entry_was_present && option.is_some() && self.len() > self.capacity {
       self.evict();
     }
+
     option
   }
 
