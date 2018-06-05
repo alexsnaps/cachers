@@ -40,6 +40,6 @@ cache.remove(key); // <4>
 ----
 <1> `cache` is not `mut`, and `<K, V>` is inferred; the cache would contain at most `size` entries;
 <2> `key` in this case would be a miss, invoking `populating_fn` only once, whether `cache` is shared across multiple
-threads or not. `populating_fn` would return the `value: V` to populate entry for `key: K`.
+threads or not. `populating_fn` would return the `value: Option<V>` to populate entry for `key: K`.
 <3> `udpate` forces an update to the `key`, whether it was present or not.
 <4> `remove` invalidates the mapping to `key` without proposing a new value.
