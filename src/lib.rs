@@ -86,7 +86,7 @@ where
   }
 
   fn evict(&self) {
-    panic!("WAIT! WHAT?!... No!")
+    unimplemented!()
   }
 }
 
