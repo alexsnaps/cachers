@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::collections::hash_map;
 use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::ops::Fn;
 use std::sync::{Arc, RwLock};
 
@@ -24,10 +24,10 @@ pub struct CacheThrough<K, V> {
 }
 
 impl<K, V> CacheThrough<K, V>
-  where K: std::cmp::Eq + std::hash::Hash,
+where
+  K: std::cmp::Eq + std::hash::Hash,
 {
-  pub fn new(capacity: usize) -> CacheThrough<K, V>
-  {
+  pub fn new(capacity: usize) -> CacheThrough<K, V> {
     CacheThrough {
       capacity,
       data: RwLock::new(HashMap::new()),
@@ -35,7 +35,8 @@ impl<K, V> CacheThrough<K, V>
   }
 
   pub fn get<F>(&self, key: K, populating_fn: F) -> Option<Arc<V>>
-    where F: Fn(&K) -> Option<V>,
+  where
+    F: Fn(&K) -> Option<V>,
   {
     if let Some(value) = self.data.read().unwrap().get(&key) {
       return Some(value.clone());
@@ -54,21 +55,20 @@ impl<K, V> CacheThrough<K, V>
   }
 
   pub fn update<F>(&self, key: K, updating_fn: F) -> Option<Arc<V>>
-    where F: Fn(&K, Option<Arc<V>>) -> Option<V>,
+  where
+    F: Fn(&K, Option<Arc<V>>) -> Option<V>,
   {
     let (entry_was_present, option) = match self.data.write().unwrap().entry(key) {
-      Entry::Occupied(mut entry) => {
-        match updating_fn(entry.key(), Some(entry.get().clone())) {
-          Some(value) => {
-            entry.insert(Arc::new(value));
-            (true, Some(entry.get().clone()))
-          }
-          None => {
-            entry.remove();
-            (false, None)
-          }
+      Entry::Occupied(mut entry) => match updating_fn(entry.key(), Some(entry.get().clone())) {
+        Some(value) => {
+          entry.insert(Arc::new(value));
+          (true, Some(entry.get().clone()))
         }
-      }
+        None => {
+          entry.remove();
+          (false, None)
+        }
+      },
       Entry::Vacant(entry) => (false, insert_if_value(updating_fn(entry.key(), None), entry)),
     };
 
@@ -88,15 +88,14 @@ impl<K, V> CacheThrough<K, V>
   }
 }
 
-fn insert_if_value<K, V>(value: Option<V>, entry: hash_map::VacantEntry<K, Arc<V>>) -> Option<Arc<V>>
-{
+fn insert_if_value<K, V>(value: Option<V>, entry: hash_map::VacantEntry<K, Arc<V>>) -> Option<Arc<V>> {
   match value {
     Some(value) => {
       let arc = Arc::new(value);
       entry.insert(arc.clone());
       Some(arc)
     }
-    None => None
+    None => None,
   }
 }
 
@@ -142,7 +141,7 @@ mod tests {
       assert_eq!(cache.len(), 1);
       cache.get(2, populate);
       cache.get(3, populate);
-//      cache.get(4, populate); // todo: don't panic, evict!!!
+      // cache.get(4, populate); // todo: don't panic, evict!!!
     }
   }
 
@@ -214,7 +213,6 @@ mod tests {
 
   #[test]
   fn shared_across_threads() {
-
     use std::sync::{Arc, Barrier};
     use std::thread;
 
