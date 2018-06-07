@@ -1,5 +1,6 @@
 use eviction::ClockEvictor;
 use std;
+use std::clone::Clone;
 use std::collections::hash_map;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -8,8 +9,19 @@ use std::sync::Arc;
 
 pub struct Segment<K, V> {
   capacity: usize,
-  data: HashMap<K, Arc<V>>,
+  data: HashMap<K, CacheEntry<V>>,
   evictor: ClockEvictor<K>,
+}
+
+struct CacheEntry<V> {
+  value: Arc<V>,
+  index: usize,
+}
+
+impl<V> Clone for CacheEntry<V> {
+  fn clone(&self) -> Self {
+    Self {value: self.value.clone(), index: self.index }
+  }
 }
 
 impl<K, V> Segment<K, V>
@@ -25,10 +37,10 @@ where
   }
 
   pub fn get(&self, key: &K) -> Option<Arc<V>> {
-    if let Some(value) = self.data.get(key) {
+    if let Some(entry) = self.data.get(key) {
       // todo touch entry
       // self.evictor.touch()
-      return Some(value.clone());
+      return Some(entry.value.clone());
     }
     None
   }
@@ -38,8 +50,16 @@ where
     F: Fn(&K) -> Option<V>,
   {
     let (entry_was_present, option) = match self.data.entry(key) {
-      Entry::Occupied(entry) => (true, Some(entry.get().clone())),
-      Entry::Vacant(entry) => (false, insert_if_value(populating_fn(entry.key()), entry)),
+      Entry::Vacant(entry) => {
+        let new_value = populating_fn(entry.key());
+        let option = insert_if_value(new_value, entry);
+        (false, option)
+      }
+      Entry::Occupied(entry) => {
+        let entry = entry.get().value.clone();
+        let option = Some(entry);
+        (true, option)
+      }
     };
 
     if !entry_was_present && option.is_some() && self.len() > self.capacity {
@@ -57,17 +77,26 @@ where
     F: Fn(&K, Option<Arc<V>>) -> Option<V>,
   {
     let (entry_was_present, option) = match self.data.entry(key) {
-      Entry::Occupied(mut entry) => match updating_fn(entry.key(), Some(entry.get().clone())) {
+      Entry::Occupied(mut entry) => match updating_fn(entry.key(), Some(entry.get().value.clone())) {
         Some(value) => {
-          entry.insert(Arc::new(value));
-          (true, Some(entry.get().clone()))
+          let cache_entry = CacheEntry {
+            value: Arc::new(value),
+            index: 0,
+          };
+          entry.insert(cache_entry);
+          let x = entry.get().clone();
+          (true, Some(x.value))
         }
         None => {
           entry.remove();
           (false, None)
         }
       },
-      Entry::Vacant(entry) => (false, insert_if_value(updating_fn(entry.key(), None), entry)),
+      Entry::Vacant(entry) => {
+        let updated = updating_fn(entry.key(), None);
+        let new_value = insert_if_value(updated, entry);
+        (false, new_value)
+      }
     };
 
     if !entry_was_present && option.is_some() && self.len() > self.capacity {
@@ -77,7 +106,10 @@ where
       // self.evictor.touch()
     }
 
-    option
+    match option {
+      Some(cache_entry) => Some(cache_entry.clone()),
+      None => None,
+    }
   }
 
   pub fn len(&self) -> usize {
@@ -89,12 +121,16 @@ where
   }
 }
 
-fn insert_if_value<K, V>(value: Option<V>, entry: hash_map::VacantEntry<K, Arc<V>>) -> Option<Arc<V>> {
+fn insert_if_value<K, V>(value: Option<V>, entry: hash_map::VacantEntry<K, CacheEntry<V>>) -> Option<Arc<V>> {
   match value {
     Some(value) => {
       let arc = Arc::new(value);
-      entry.insert(arc.clone());
-      Some(arc)
+      let cache_entry = CacheEntry {
+        value: arc.clone(),
+        index: 0,
+      };
+      entry.insert(cache_entry.clone());
+      Some(cache_entry.value)
     }
     None => None,
   }
