@@ -1,3 +1,5 @@
+image:https://gitlab.com/alexsnaps/cachers/badges/master/pipeline.svg[link="https://gitlab.com/alexsnaps/cachers/commits/master",title="pipeline status"]
+
 # Cache.rs
 
 I've been toying around with the idea of implementing a low & predictable latency caching library in Rust for a while.
