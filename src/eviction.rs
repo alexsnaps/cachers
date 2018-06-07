@@ -13,7 +13,7 @@ pub struct ClockEvictor<K> {
 }
 
 impl<K> ClockEvictor<K> {
-  fn new(capacity: usize) -> ClockEvictor<K> {
+  pub fn new(capacity: usize) -> ClockEvictor<K> {
     ClockEvictor {
       capacity: capacity,
       current_pos: 0,
@@ -31,12 +31,10 @@ impl<K> ClockEvictor<K> {
 
     let offset = match self.clock[self.current_pos..].iter_mut().position(flip_and_match) {
       Some(index) => index,
-      None => {
-        match self.clock[..self.current_pos].iter_mut().position(flip_and_match) {
-          Some(index) => index,
-          None => self.current_pos
-        }
-      }
+      None => match self.clock[..self.current_pos].iter_mut().position(flip_and_match) {
+        Some(index) => index,
+        None => self.current_pos,
+      },
     };
     let mut index = self.current_pos + offset;
     if index >= self.capacity {
@@ -49,7 +47,6 @@ impl<K> ClockEvictor<K> {
 
 impl<K> Evictor<K> for ClockEvictor<K> {
   fn add(&mut self, key: K) -> (usize, Option<K>) {
-
     let (index, victim) = if self.mapping.len() < self.capacity {
       (self.mapping.len(), None)
     } else {

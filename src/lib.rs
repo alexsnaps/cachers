@@ -13,16 +13,15 @@
 // limitations under the License.
 
 mod eviction;
+mod segment;
 
-use std::collections::hash_map;
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
 use std::ops::Fn;
 use std::sync::{Arc, RwLock};
 
+use segment::Segment;
+
 pub struct CacheThrough<K, V> {
-  capacity: usize,
-  data: RwLock<HashMap<K, Arc<V>>>,
+  data: RwLock<Segment<K, V>>,
 }
 
 impl<K, V> CacheThrough<K, V>
@@ -31,8 +30,7 @@ where
 {
   pub fn new(capacity: usize) -> CacheThrough<K, V> {
     CacheThrough {
-      capacity,
-      data: RwLock::new(HashMap::new()),
+      data: RwLock::new(Segment::new(capacity)),
     }
   }
 
@@ -41,63 +39,21 @@ where
     F: Fn(&K) -> Option<V>,
   {
     if let Some(value) = self.data.read().unwrap().get(&key) {
-      return Some(value.clone());
+      return Some(value);
     }
 
-    let (entry_was_present, option) = match self.data.write().unwrap().entry(key) {
-      Entry::Occupied(entry) => (true, Some(entry.get().clone())),
-      Entry::Vacant(entry) => (false, insert_if_value(populating_fn(entry.key()), entry)),
-    };
-
-    if !entry_was_present && option.is_some() && self.len() > self.capacity {
-      self.evict();
-    }
-
-    option
+    self.data.write().unwrap().get_or_populate(key, populating_fn)
   }
 
   pub fn update<F>(&self, key: K, updating_fn: F) -> Option<Arc<V>>
   where
     F: Fn(&K, Option<Arc<V>>) -> Option<V>,
   {
-    let (entry_was_present, option) = match self.data.write().unwrap().entry(key) {
-      Entry::Occupied(mut entry) => match updating_fn(entry.key(), Some(entry.get().clone())) {
-        Some(value) => {
-          entry.insert(Arc::new(value));
-          (true, Some(entry.get().clone()))
-        }
-        None => {
-          entry.remove();
-          (false, None)
-        }
-      },
-      Entry::Vacant(entry) => (false, insert_if_value(updating_fn(entry.key(), None), entry)),
-    };
-
-    if !entry_was_present && option.is_some() && self.len() > self.capacity {
-      self.evict();
-    }
-
-    option
+    self.data.write().unwrap().update(key, updating_fn)
   }
 
   fn len(&self) -> usize {
     self.data.read().unwrap().len()
-  }
-
-  fn evict(&self) {
-    unimplemented!()
-  }
-}
-
-fn insert_if_value<K, V>(value: Option<V>, entry: hash_map::VacantEntry<K, Arc<V>>) -> Option<Arc<V>> {
-  match value {
-    Some(value) => {
-      let arc = Arc::new(value);
-      entry.insert(arc.clone());
-      Some(arc)
-    }
-    None => None,
   }
 }
 
