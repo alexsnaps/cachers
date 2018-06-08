@@ -52,6 +52,10 @@ where
     self.data.write().unwrap().update(key, updating_fn)
   }
 
+  pub fn remove(&self, key: K) {
+    self.data.write().unwrap().update(key, |_, _| None);
+  }
+
   fn len(&self) -> usize {
     self.data.read().unwrap().len()
   }
@@ -165,6 +169,23 @@ mod tests {
     {
       let value = cache.get(our_key, miss);
       assert_eq!(value, None);
+      assert_eq!(cache.len(), 0);
+    }
+  }
+
+  #[test]
+  fn remove_removes() {
+    let cache: CacheThrough<i32, String> = test_cache();
+    let our_key = 42;
+
+    {
+      let value = cache.get(our_key, populate);
+      assert_eq!(*value.unwrap(), "42");
+      assert_eq!(cache.len(), 1);
+    }
+
+    {
+      cache.remove(our_key);
       assert_eq!(cache.len(), 0);
     }
   }
