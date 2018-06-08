@@ -1,6 +1,5 @@
 use eviction::ClockEvictor;
 use std;
-use std::clone::Clone;
 use std::collections::hash_map;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -16,12 +15,6 @@ pub struct Segment<K, V> {
 struct CacheEntry<V> {
   value: Arc<V>,
   index: usize,
-}
-
-impl<V> Clone for CacheEntry<V> {
-  fn clone(&self) -> Self {
-    Self {value: self.value.clone(), index: self.index }
-  }
 }
 
 impl<K, V> Segment<K, V>
@@ -79,13 +72,9 @@ where
     let (entry_was_present, option) = match self.data.entry(key) {
       Entry::Occupied(mut entry) => match updating_fn(entry.key(), Some(entry.get().value.clone())) {
         Some(value) => {
-          let cache_entry = CacheEntry {
-            value: Arc::new(value),
-            index: 0,
-          };
-          entry.insert(cache_entry);
-          let x = entry.get().clone();
-          (true, Some(x.value))
+          let cache_entry = entry.get_mut();
+          cache_entry.value = Arc::new(value);
+          (true, Some(cache_entry.value.clone()))
         }
         None => {
           entry.remove();
@@ -124,13 +113,11 @@ where
 fn insert_if_value<K, V>(value: Option<V>, entry: hash_map::VacantEntry<K, CacheEntry<V>>) -> Option<Arc<V>> {
   match value {
     Some(value) => {
-      let arc = Arc::new(value);
-      let cache_entry = CacheEntry {
-        value: arc.clone(),
+      let cache_entry = entry.insert(CacheEntry {
+        value: Arc::new(value),
         index: 0,
-      };
-      entry.insert(cache_entry.clone());
-      Some(cache_entry.value)
+      });
+      Some(cache_entry.value.clone())
     }
     None => None,
   }
