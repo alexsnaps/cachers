@@ -43,16 +43,8 @@ where
     F: Fn(&K) -> Option<V>,
   {
     let (entry_was_present, option) = match self.data.entry(key) {
-      Entry::Vacant(entry) => {
-        let new_value = populating_fn(entry.key());
-        let option = insert_if_value(new_value, entry);
-        (false, option)
-      }
-      Entry::Occupied(entry) => {
-        let entry = entry.get().value.clone();
-        let option = Some(entry);
-        (true, option)
-      }
+      Entry::Occupied(entry) => (true, Some(entry.get().value.clone())),
+      Entry::Vacant(entry) => (false, insert_if_value(populating_fn(entry.key()), entry)),
     };
 
     if !entry_was_present && option.is_some() && self.len() > self.capacity {
@@ -81,11 +73,7 @@ where
           (false, None)
         }
       },
-      Entry::Vacant(entry) => {
-        let updated = updating_fn(entry.key(), None);
-        let new_value = insert_if_value(updated, entry);
-        (false, new_value)
-      }
+      Entry::Vacant(entry) => (false, insert_if_value(updating_fn(entry.key(), None), entry)),
     };
 
     if !entry_was_present && option.is_some() && self.len() > self.capacity {
