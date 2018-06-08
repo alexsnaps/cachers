@@ -39,12 +39,16 @@ eviction data) and see how that affects the design.
 [source,rust]
 ----
 let cache = Cachers::create(size); // <1>
-let value = cache.get(key, populating_fn); // <2>
-cache.udpate(key, populating_fn); // <3>
+let value: Option<Arc<V>> = cache.get(key, populating_fn); // <2>
+let updated: Option<Arc<V>> = cache.udpate(key, updating_fn); // <3>
 cache.remove(key); // <4>
 ----
 <1> `cache` is not `mut`, and `<K, V>` is inferred; the cache would contain at most `size` entries;
-<2> `key` in this case would be a miss, invoking `populating_fn` only once, whether `cache` is shared across multiple
-threads or not. `populating_fn` would return the `value: Option<V>` to populate entry for `key: K`.
-<3> `udpate` forces an update to the `key`, whether it was present or not.
-<4> `remove` invalidates the mapping to `key` without proposing a new value.
+<2> `key` in this case would be a miss, invoking `populating_fn` only once, whether `cache` even if cache was shared
+across threads all trying to access the same `key`. `populating_fn` returns the value `Some<V>` to populate entry for
+`key: K`. The `.get` then returns a `Option<Arc<V>>`, with `None` if the `populating_fn` returned a `None`
+<3> `.udpate` forces an update to the `key`, whether it was already present or not. `updating_fn` receives the key but
+also, unlike `populating_fn`, a `Option<Arc<V>>` that represents the previous value if present; `.update` then returns
+the updated `V`
+<4> `remove` invalidates the mapping to `key` without proposing a new value. Which is effectively the equivalent of an
+`.update(key, |_, _| None)`.
