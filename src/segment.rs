@@ -1,4 +1,5 @@
 use eviction::ClockEvictor;
+use eviction::Evictor;
 use std;
 use std::collections::hash_map;
 use std::collections::hash_map::Entry;
@@ -30,10 +31,9 @@ where
   }
 
   pub fn get(&self, key: &K) -> Option<Arc<V>> {
-    if let Some(entry) = self.data.get(key) {
-      // todo touch entry
-      // self.evictor.touch()
-      return Some(entry.value.clone());
+    if let Some(cache_entry) = self.data.get(key) {
+      self.evictor.touch(cache_entry.index);
+      return Some(cache_entry.value.clone());
     }
     None
   }
@@ -43,15 +43,16 @@ where
     F: Fn(&K) -> Option<V>,
   {
     let (entry_was_present, option) = match self.data.entry(key) {
-      Entry::Occupied(entry) => (true, Some(entry.get().value.clone())),
+      Entry::Occupied(entry) => {
+        let cache_entry = entry.get();
+        self.evictor.touch(cache_entry.index);
+        (true, Some(cache_entry.value.clone()))
+      },
       Entry::Vacant(entry) => (false, insert_if_value(populating_fn(entry.key()), entry)),
     };
 
     if !entry_was_present && option.is_some() && self.len() > self.capacity {
       self.evict();
-    } else if entry_was_present && option.is_some() {
-      // todo touch entry
-      // self.evictor.touch()
     }
 
     option
@@ -66,6 +67,7 @@ where
         Some(value) => {
           let cache_entry = entry.get_mut();
           cache_entry.value = Arc::new(value);
+          self.evictor.touch(cache_entry.index);
           (true, Some(cache_entry.value.clone()))
         }
         None => {
@@ -78,9 +80,6 @@ where
 
     if !entry_was_present && option.is_some() && self.len() > self.capacity {
       self.evict();
-    } else if entry_was_present && option.is_some() {
-      // todo touch entry
-      // self.evictor.touch()
     }
 
     match option {
