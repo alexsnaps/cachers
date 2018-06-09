@@ -7,7 +7,6 @@ use std::ops::Fn;
 use std::sync::Arc;
 
 pub struct Segment<K, V> {
-  capacity: usize,
   data: HashMap<K, CacheEntry<V>>,
   evictor: ClockEvictor<K>,
 }
@@ -23,7 +22,6 @@ where
 {
   pub fn new(capacity: usize) -> Segment<K, V> {
     Segment {
-      capacity,
       data: HashMap::new(),
       evictor: ClockEvictor::new(capacity),
     }
@@ -41,11 +39,11 @@ where
   where
     F: Fn(&K) -> Option<V>,
   {
-    let (key_to_remove, option) = match self.data.entry(key) {
+    let (option, key_evicted) = match self.data.entry(key) {
       Entry::Occupied(entry) => {
         let cache_entry = entry.get();
         self.evictor.touch(cache_entry.index);
-        (None, Some(cache_entry.value.clone()))
+        (Some(cache_entry.value.clone()), None)
       },
       Entry::Vacant(entry) => {
         let (option, to_remove) = match populating_fn(entry.key()) {
@@ -59,12 +57,12 @@ where
           }
           None => (None, None),
         };
-        (to_remove, option)
+        (option, to_remove)
       },
     };
 
-    if key_to_remove.is_some() {
-      self.data.remove(&key_to_remove.unwrap());
+    if key_evicted.is_some() {
+      self.data.remove(&key_evicted.unwrap());
     }
 
     option
@@ -74,36 +72,37 @@ where
   where
     F: Fn(&K, Option<Arc<V>>) -> Option<V>,
   {
-    let (entry_was_present, option) = match self.data.entry(key) {
+    let (option, key_evicted) = match self.data.entry(key) {
       Entry::Occupied(mut entry) => match updating_fn(entry.key(), Some(entry.get().value.clone())) {
         Some(value) => {
           let cache_entry = entry.get_mut();
           cache_entry.value = Arc::new(value);
           self.evictor.touch(cache_entry.index);
-          (true, Some(cache_entry.value.clone()))
+          (Some(cache_entry.value.clone()), None)
         }
         None => {
           entry.remove();
-          (false, None)
+          (None, None)
         }
       },
       Entry::Vacant(entry) => {
-        let option = match updating_fn(entry.key(), None) {
+        let (option, key_evicted) = match updating_fn(entry.key(), None) {
           Some(value) => {
+            let (index, to_remove) = self.evictor.add(entry.key().clone());
             let cache_entry = entry.insert(CacheEntry {
               value: Arc::new(value),
-              index: 0,
+              index: index,
             });
-            Some(cache_entry.value.clone())
+            (Some(cache_entry.value.clone()), to_remove)
           }
-          None => None,
+          None => (None, None),
         };
-        (false, option)
+        (option, key_evicted)
       },
     };
 
-    if !entry_was_present && option.is_some() && self.len() > self.capacity {
-      self.evict();
+    if key_evicted.is_some() {
+      self.data.remove(&key_evicted.unwrap());
     }
 
     match option {
@@ -114,10 +113,6 @@ where
 
   pub fn len(&self) -> usize {
     self.data.len()
-  }
-
-  fn evict(&mut self) {
-    unimplemented!()
   }
 }
 
@@ -156,7 +151,12 @@ mod tests {
       assert_eq!(value, None);
       assert_eq!(segment.len(), 0);
     }
+  }
 
+  #[test]
+  fn get_or_populate_evicts() {
+    let mut segment: Segment<i32, String> = test_segment();
+    let our_key = 42;
     {
       let value = segment.get_or_populate(our_key, populate);
       assert_eq!(*value.unwrap(), "42");
@@ -208,6 +208,22 @@ mod tests {
       let value = segment.get_or_populate(our_key, do_not_invoke);
       assert_eq!(*value.unwrap(), "42 updated!");
       assert_eq!(segment.len(), 1);
+    }
+  }
+
+  #[test]
+  fn update_evicts() {
+    let mut segment: Segment<i32, String> = test_segment();
+    let our_key = 42;
+    {
+      let value = segment.update(our_key, upsert);
+      assert_eq!(*value.unwrap(), "42");
+      assert_eq!(segment.len(), 1);
+      segment.update(2, upsert);
+      segment.update(3, upsert);
+      assert_eq!(segment.len(), 3);
+      segment.update(4, upsert);
+      assert_eq!(segment.len(), 3);
     }
   }
 
