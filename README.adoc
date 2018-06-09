@@ -9,6 +9,9 @@ control, and possibly supporting pluggable eviction algorithms while not hurting
 think isn't possible: i.e. some sacrifice on the design side on the altar of performance will forever be required,
 which will come at odds with the pluggable eviction. But I still would like to toy with the challenge.
 
+WARNING: This is all just me fooling around as of now. I'm merely trying to get a thing that works & exposes a somewhat
+sensible API. Once I have that sorted out, I'll iterate over the implementation and start making it faster...
+
 ## Initial features
 
 - Cache through API
