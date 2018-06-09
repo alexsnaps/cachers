@@ -1,14 +1,15 @@
 use std::collections::HashMap;
+use std::sync::RwLock;
 
 pub trait Evictor<K> {
   fn add(&mut self, key: K) -> (usize, Option<K>);
-  fn touch(&mut self, index: usize);
+  fn touch(&self, index: usize);
 }
 
 pub struct ClockEvictor<K> {
   capacity: usize,
   current_pos: usize,
-  clock: Vec<bool>,
+  clock: RwLock<Vec<bool>>,
   mapping: HashMap<usize, K>,
 }
 
@@ -17,7 +18,7 @@ impl<K> ClockEvictor<K> {
     ClockEvictor {
       capacity: capacity,
       current_pos: 0,
-      clock: vec![false; capacity],
+      clock: RwLock::new(vec![false; capacity]),
       mapping: HashMap::with_capacity(capacity),
     }
   }
@@ -28,10 +29,11 @@ impl<K> ClockEvictor<K> {
       *touched = false;
       victim
     };
+    let mut clock = self.clock.write().unwrap();
 
-    let offset = match self.clock[self.current_pos..].iter_mut().position(flip_and_match) {
+    let offset = match clock[self.current_pos..].iter_mut().position(flip_and_match) {
       Some(index) => index,
-      None => match self.clock[..self.current_pos].iter_mut().position(flip_and_match) {
+      None => match clock[..self.current_pos].iter_mut().position(flip_and_match) {
         Some(index) => index,
         None => self.current_pos,
       },
@@ -58,8 +60,9 @@ impl<K> Evictor<K> for ClockEvictor<K> {
     (index, victim)
   }
 
-  fn touch(&mut self, index: usize) {
-    self.clock[index] = true;
+  fn touch(&self, index: usize) {
+    let mut clock = self.clock.write().unwrap();
+    clock[index] = true;
   }
 }
 
