@@ -191,6 +191,62 @@ mod tests {
   }
 
   #[test]
+  fn evicts() {
+    let cache: CacheThrough<i32, String> = test_cache();
+
+    {
+      assert_eq!(*cache.get(1, populate).unwrap(), "1"); // eviction candidate
+      assert_eq!(cache.len(), 1);
+      assert_eq!(*cache.get(2, populate).unwrap(), "2");
+      assert_eq!(cache.len(), 2);
+      assert_eq!(*cache.get(3, populate).unwrap(), "3");
+      assert_eq!(cache.len(), 3);
+
+      // Clock state & hand:
+      // _
+      // 111
+    }
+
+    {
+      assert_eq!(*cache.get(4, populate).unwrap(), "4"); // evicts 1
+      assert_eq!(cache.len(), 3);
+      //  _
+      // 100
+
+      assert_eq!(*cache.get(2, do_not_invoke).unwrap(), "2");
+      assert_eq!(cache.len(), 3);
+      //  _
+      // 110
+
+      assert_eq!(*cache.get(3, do_not_invoke).unwrap(), "3");
+      assert_eq!(cache.len(), 3);
+      //  _
+      // 111
+    }
+
+    {
+      assert_eq!(*cache.get(5, populate).unwrap(), "5"); // evicts 3
+      assert_eq!(cache.len(), 3);
+      //   _
+      // 010
+
+      assert_eq!(*cache.get(2, do_not_invoke).unwrap(), "2"); // 011
+      assert_eq!(cache.len(), 3);
+      assert_eq!(*cache.get(4, do_not_invoke).unwrap(), "4"); // 111
+      assert_eq!(cache.len(), 3);
+    }
+
+    {
+      assert_eq!(*cache.get(6, populate).unwrap(), "6"); // evicts 4
+      assert_eq!(cache.len(), 3);
+      assert_eq!(*cache.get(5, do_not_invoke).unwrap(), "5");
+      assert_eq!(cache.len(), 3);
+      assert_eq!(*cache.get(2, do_not_invoke).unwrap(), "2");
+      assert_eq!(cache.len(), 3);
+    }
+  }
+
+  #[test]
   fn shared_across_threads() {
     use std::sync::{Arc, Barrier};
     use std::thread;

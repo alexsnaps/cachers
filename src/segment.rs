@@ -44,7 +44,7 @@ where
         let cache_entry = entry.get();
         self.evictor.touch(cache_entry.index);
         (Some(cache_entry.value.clone()), None)
-      },
+      }
       Entry::Vacant(entry) => {
         let (option, to_remove) = match populating_fn(entry.key()) {
           Some(value) => {
@@ -58,7 +58,7 @@ where
           None => (None, None),
         };
         (option, to_remove)
-      },
+      }
     };
 
     if key_evicted.is_some() {
@@ -98,7 +98,7 @@ where
           None => (None, None),
         };
         (option, key_evicted)
-      },
+      }
     };
 
     if key_evicted.is_some() {
