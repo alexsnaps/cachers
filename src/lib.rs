@@ -12,25 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map;
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+mod eviction;
+mod segment;
+
 use std::ops::Fn;
 use std::sync::{Arc, RwLock};
 
+use segment::Segment;
+
 pub struct CacheThrough<K, V> {
-  capacity: usize,
-  data: RwLock<HashMap<K, Arc<V>>>,
+  data: RwLock<Segment<K, V>>,
 }
 
 impl<K, V> CacheThrough<K, V>
 where
-  K: std::cmp::Eq + std::hash::Hash,
+  K: std::cmp::Eq + std::hash::Hash + Clone,
 {
   pub fn new(capacity: usize) -> CacheThrough<K, V> {
     CacheThrough {
-      capacity,
-      data: RwLock::new(HashMap::new()),
+      data: RwLock::new(Segment::new(capacity)),
     }
   }
 
@@ -39,63 +39,25 @@ where
     F: Fn(&K) -> Option<V>,
   {
     if let Some(value) = self.data.read().unwrap().get(&key) {
-      return Some(value.clone());
+      return Some(value);
     }
 
-    let (entry_was_present, option) = match self.data.write().unwrap().entry(key) {
-      Entry::Occupied(entry) => (true, Some(entry.get().clone())),
-      Entry::Vacant(entry) => (false, insert_if_value(populating_fn(entry.key()), entry)),
-    };
-
-    if !entry_was_present && option.is_some() && self.len() > self.capacity {
-      self.evict();
-    }
-
-    option
+    self.data.write().unwrap().get_or_populate(key, populating_fn)
   }
 
   pub fn update<F>(&self, key: K, updating_fn: F) -> Option<Arc<V>>
   where
     F: Fn(&K, Option<Arc<V>>) -> Option<V>,
   {
-    let (entry_was_present, option) = match self.data.write().unwrap().entry(key) {
-      Entry::Occupied(mut entry) => match updating_fn(entry.key(), Some(entry.get().clone())) {
-        Some(value) => {
-          entry.insert(Arc::new(value));
-          (true, Some(entry.get().clone()))
-        }
-        None => {
-          entry.remove();
-          (false, None)
-        }
-      },
-      Entry::Vacant(entry) => (false, insert_if_value(updating_fn(entry.key(), None), entry)),
-    };
+    self.data.write().unwrap().update(key, updating_fn)
+  }
 
-    if !entry_was_present && option.is_some() && self.len() > self.capacity {
-      self.evict();
-    }
-
-    option
+  pub fn remove(&self, key: K) {
+    self.data.write().unwrap().update(key, |_, _| None);
   }
 
   fn len(&self) -> usize {
     self.data.read().unwrap().len()
-  }
-
-  fn evict(&self) {
-    panic!("WAIT! WHAT?!... No!")
-  }
-}
-
-fn insert_if_value<K, V>(value: Option<V>, entry: hash_map::VacantEntry<K, Arc<V>>) -> Option<Arc<V>> {
-  match value {
-    Some(value) => {
-      let arc = Arc::new(value);
-      entry.insert(arc.clone());
-      Some(arc)
-    }
-    None => None,
   }
 }
 
@@ -208,6 +170,79 @@ mod tests {
       let value = cache.get(our_key, miss);
       assert_eq!(value, None);
       assert_eq!(cache.len(), 0);
+    }
+  }
+
+  #[test]
+  fn remove_removes() {
+    let cache: CacheThrough<i32, String> = test_cache();
+    let our_key = 42;
+
+    {
+      let value = cache.get(our_key, populate);
+      assert_eq!(*value.unwrap(), "42");
+      assert_eq!(cache.len(), 1);
+    }
+
+    {
+      cache.remove(our_key);
+      assert_eq!(cache.len(), 0);
+    }
+  }
+
+  #[test]
+  fn evicts() {
+    let cache: CacheThrough<i32, String> = test_cache();
+
+    {
+      assert_eq!(*cache.get(1, populate).unwrap(), "1"); // eviction candidate
+      assert_eq!(cache.len(), 1);
+      assert_eq!(*cache.get(2, populate).unwrap(), "2");
+      assert_eq!(cache.len(), 2);
+      assert_eq!(*cache.get(3, populate).unwrap(), "3");
+      assert_eq!(cache.len(), 3);
+
+      // Clock state & hand:
+      // _
+      // 111
+    }
+
+    {
+      assert_eq!(*cache.get(4, populate).unwrap(), "4"); // evicts 1
+      assert_eq!(cache.len(), 3);
+      //  _
+      // 100
+
+      assert_eq!(*cache.get(2, do_not_invoke).unwrap(), "2");
+      assert_eq!(cache.len(), 3);
+      //  _
+      // 110
+
+      assert_eq!(*cache.get(3, do_not_invoke).unwrap(), "3");
+      assert_eq!(cache.len(), 3);
+      //  _
+      // 111
+    }
+
+    {
+      assert_eq!(*cache.get(5, populate).unwrap(), "5"); // evicts 3
+      assert_eq!(cache.len(), 3);
+      //   _
+      // 010
+
+      assert_eq!(*cache.get(2, do_not_invoke).unwrap(), "2"); // 011
+      assert_eq!(cache.len(), 3);
+      assert_eq!(*cache.get(4, do_not_invoke).unwrap(), "4"); // 111
+      assert_eq!(cache.len(), 3);
+    }
+
+    {
+      assert_eq!(*cache.get(6, populate).unwrap(), "6"); // evicts 4
+      assert_eq!(cache.len(), 3);
+      assert_eq!(*cache.get(5, do_not_invoke).unwrap(), "5");
+      assert_eq!(cache.len(), 3);
+      assert_eq!(*cache.get(2, do_not_invoke).unwrap(), "2");
+      assert_eq!(cache.len(), 3);
     }
   }
 
