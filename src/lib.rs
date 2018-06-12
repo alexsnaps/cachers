@@ -26,7 +26,7 @@ pub struct CacheThrough<K, V> {
 
 impl<K, V> CacheThrough<K, V>
 where
-  K: std::cmp::Eq + std::hash::Hash + Clone,
+  K: std::cmp::Eq + std::hash::Hash + Copy,
 {
   pub fn new(capacity: usize) -> CacheThrough<K, V> {
     CacheThrough {
