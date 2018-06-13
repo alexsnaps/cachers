@@ -12,6 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! # Cachers [WIP!]
+//!
+//! `cachers` is a library for in-memory caching in Rust.
+//!
+//! ## What's in it?
+//!
+//! It currently only consists of a single `CacheThough` type, that internally uses a `ClockEvictor`
+//! for freeing memory when capacity is reached.
+//!
+//! Eventually this will hopefully become a full set of out-of-the-box ready-to-use caching tools
+//!
+//! ## Word of warning
+//!
+//! This is all very much _work in progress_. Fundamentally, it's just me having fun with Rust...
+//!
+
 mod eviction;
 mod segment;
 
@@ -20,6 +36,42 @@ use std::sync::{Arc, RwLock};
 
 use segment::Segment;
 
+/// A thread-safe cache that will populate entries on misses using the provided
+/// function, aka a cache-through cache. Uses interior mutability, which means you can simply
+/// share a non-mutable reference to both read & insert/update entries to the cache.
+///
+/// The `CacheThrough` cache uses clock eviction to free elements when it reaches capacity.
+///
+///
+/// In the example below, we create a `CacheThrough` shared across the main thread and another
+/// thread we span ourselves. The main thread will populate the `42` entry and the other thread
+/// will read it back:
+///
+/// ```
+/// use std::sync::{Arc, Barrier};
+/// use std::thread;
+///
+/// use cachers::CacheThrough;
+///
+/// let cache: Arc<CacheThrough<i32, String>> = Arc::new(CacheThrough::new(100));
+/// let other_cache = cache.clone();
+/// let our_key = 42;
+///
+/// let barrier = Arc::new(Barrier::new(2));
+/// let other_barrier = barrier.clone();
+///
+/// let t = thread::spawn(move || {
+///   other_barrier.wait(); // wait for main thread to populate
+///   let value = other_cache.get(our_key, |_| unimplemented!() ); // entry should be there!
+///   assert_eq!(*value.unwrap(), "42");
+/// });
+///
+/// let value = cache.get(our_key, |key| Some(key.to_string()) ); // miss, so populating
+/// assert_eq!(*value.unwrap(), "42");
+/// barrier.wait(); // let the other thread proceed
+///
+/// t.join().unwrap();
+/// ```
 pub struct CacheThrough<K, V> {
   data: RwLock<Segment<K, V>>,
 }
@@ -28,12 +80,32 @@ impl<K, V> CacheThrough<K, V>
 where
   K: std::cmp::Eq + std::hash::Hash + Copy,
 {
+  /// Creates a new `CacheThrough` instance of the given `capacity`
+  ///
+  /// ```
+  /// use cachers::CacheThrough;
+  ///
+  /// let cache = CacheThrough::<usize, String>::new(100);
+  /// ```
   pub fn new(capacity: usize) -> CacheThrough<K, V> {
     CacheThrough {
       data: RwLock::new(Segment::new(capacity)),
     }
   }
 
+  /// Retrieves a shared reference to the `V` for the given `key`.
+  /// The `populating_fn` will be invoked to populate the cache, should there be no mapping
+  /// for the `key` already present. The `populating_fn` receives the `key` as an argument.
+  ///
+  /// It is guaranteed that `populating_fn` will only be invoked once. That is if multiple thread
+  /// race to populate the cache for a given `key`, only one thread will invoke the `populating_fn`.
+  /// Once `populating_fn` has returned `Some<V>`, the other threads waiting for the entry to
+  /// be populated will get the `Arc<V>` returned.
+  ///
+  /// In the case where `populating_fn` yield no results (i.e. returns `Option::None`), no
+  /// guarantees are made about how many times the `populating_fn` may be called.
+  ///
+  /// If you want to cache misses, consider wrapping your `V` into an `Option`.
   pub fn get<F>(&self, key: K, populating_fn: F) -> Option<Arc<V>>
   where
     F: Fn(&K) -> Option<V>,
@@ -45,6 +117,14 @@ where
     self.data.write().unwrap().get_or_populate(key, populating_fn)
   }
 
+  /// Updates an entry in the cache, or populates it if absent.
+  ///
+  /// The update can be an actual update or a remove, should the `updating_fn` return a `None`.
+  /// The `updating_fn` receives the `key`, as well as an `Option<Arc<V>>` which holds the previous
+  /// value for the `key`, which would be `None` if the function is about to populate the cache.
+  ///
+  /// It is guaranteed that the mapping will not be altered by another thread while the
+  /// `populating_fn` executes.
   pub fn update<F>(&self, key: K, updating_fn: F) -> Option<Arc<V>>
   where
     F: Fn(&K, Option<Arc<V>>) -> Option<V>,
@@ -52,10 +132,13 @@ where
     self.data.write().unwrap().update(key, updating_fn)
   }
 
+  /// Removes the entry for `key` from the cache.
+  /// This is the equivalent of `cache.update(key, |_, _| None)`. Consider this a convenience method.
   pub fn remove(&self, key: K) {
     self.data.write().unwrap().update(key, |_, _| None);
   }
 
+  #[cfg(test)]
   fn len(&self) -> usize {
     self.data.read().unwrap().len()
   }
@@ -244,33 +327,6 @@ mod tests {
       assert_eq!(*cache.get(2, do_not_invoke).unwrap(), "2");
       assert_eq!(cache.len(), 3);
     }
-  }
-
-  #[test]
-  fn shared_across_threads() {
-    use std::sync::{Arc, Barrier};
-    use std::thread;
-
-    let cache: Arc<CacheThrough<i32, String>> = Arc::new(test_cache());
-    let other_cache = cache.clone();
-    let our_key = 42;
-
-    let barrier = Arc::new(Barrier::new(2));
-    let other_barrier = barrier.clone();
-
-    let t = thread::spawn(move || {
-      other_barrier.wait();
-      let value = other_cache.get(our_key, do_not_invoke);
-      assert_eq!(*value.unwrap(), "42");
-      assert_eq!(other_cache.len(), 1);
-    });
-
-    let value = cache.get(our_key, populate);
-    assert_eq!(*value.unwrap(), "42");
-    assert_eq!(cache.len(), 1);
-    barrier.wait();
-
-    t.join().unwrap();
   }
 
   fn miss(_key: &i32) -> Option<String> {
