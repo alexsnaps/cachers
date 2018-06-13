@@ -32,7 +32,7 @@ struct CacheEntry<V> {
 
 impl<K, V> Segment<K, V>
 where
-  K: std::cmp::Eq + std::hash::Hash + Clone,
+  K: std::cmp::Eq + std::hash::Hash + Copy,
 {
   pub fn new(capacity: usize) -> Segment<K, V> {
     Segment {
@@ -102,7 +102,7 @@ where
       Entry::Vacant(entry) => {
         let (option, key_evicted) = match updating_fn(entry.key(), None) {
           Some(value) => {
-            let (index, to_remove) = self.evictor.add(entry.key().clone());
+            let (index, to_remove) = self.evictor.add(*entry.key());
             let cache_entry = entry.insert(CacheEntry {
               value: Arc::new(value),
               index: index,
