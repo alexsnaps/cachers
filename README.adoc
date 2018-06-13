@@ -21,6 +21,35 @@ sensible API. Once I have that sorted out, I'll iterate over the implementation 
 - [ ] Segmented storage, leveraging `std::hash`
 - [ ] Fine(r) grained locking (i.e. don't lock the entire Cache/Segment on populating, as populating could take a while)
 
+### Roadmap
+
+#### v0.1.0
+
+- [x] Basic API
+- [x] Minimal & naive implementation of the API
+
+#### v0.2.0
+
+- [ ] Finer grained locking
+- [ ] Proper segmenting
+- [ ] First pass of performance improvements
+
+#### v0.3.0
+
+- [ ] Perf optimizations on `CacheThrough`
+- [ ] Start adding other cache APIs (i.e. other than `CacheThrough`, maybe a cache-aside?)
+
+#### v0.4.0
+
+- [ ] More eviction algorithms?
+- [ ] Composability? ... of caches & evictors?
+
+#### v1.0.0
+
+- Whenever we have a nice set of tools in the toolbox :)
+
+I think the `v0.x` releases should inform how to resolve the tension between API & performance.
+
 ## Implementation details
 
 The key part in this _I think_, but that's the point behind the whole project, is to be able to walk the clock hand in
