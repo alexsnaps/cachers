@@ -81,8 +81,8 @@ impl<K> Evictor<K> for ClockEvictor<K> {
 }
 
 mod tests {
-  use super::ClockEvictor;
-  use super::Evictor;
+  #[allow(unused_imports)]
+  use super::{ClockEvictor, Evictor};
 
   #[test]
   fn test_it_works() {

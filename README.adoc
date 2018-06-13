@@ -14,11 +14,41 @@ sensible API. Once I have that sorted out, I'll iterate over the implementation 
 
 ## Initial features
 
-- Cache through API
-- Once-and-only-once loading
-- Clock eviction
-- Thread-safe, with interior mutability
-- Fine(r) grained locking (i.e. don't lock the entire Cache/Segment on populating, as populating could take a while)
+- [x] Cache through API
+- [x] Once-and-only-once loading
+- [x] Clock eviction
+- [x] Thread-safe, with interior mutability
+- [ ] Segmented storage, leveraging `std::hash`
+- [ ] Fine(r) grained locking (i.e. don't lock the entire Cache/Segment on populating, as populating could take a while)
+
+### Roadmap
+
+#### v0.1.0
+
+- [x] Basic API
+- [x] Minimal & naive implementation of the API
+
+#### v0.2.0
+
+- [ ] Finer grained locking
+- [ ] Proper segmenting
+- [ ] First pass of performance improvements
+
+#### v0.3.0
+
+- [ ] Perf optimizations on `CacheThrough`
+- [ ] Start adding other cache APIs (i.e. other than `CacheThrough`, maybe a cache-aside?)
+
+#### v0.4.0
+
+- [ ] More eviction algorithms?
+- [ ] Composability? ... of caches & evictors?
+
+#### v1.0.0
+
+- Whenever we have a nice set of tools in the toolbox :)
+
+I think the `v0.x` releases should inform how to resolve the tension between API & performance.
 
 ## Implementation details
 
@@ -33,12 +63,11 @@ lowering the guarantees for these.
 Finally, trying to plug another eviction algorithm (probably LRU, which requires a different approach to storing the
 eviction data) and see how that affects the design.
 
-### Raw API idea
+### Current API proposal
 
-.api.rs
 [source,rust]
 ----
-let cache = Cachers::create(size); // <1>
+let cache = cachers::CacheThrough::new(size); // <1>
 let value: Option<Arc<V>> = cache.get(key, populating_fn); // <2>
 let updated: Option<Arc<V>> = cache.udpate(key, updating_fn); // <3>
 cache.remove(key); // <4>
@@ -51,4 +80,4 @@ across threads all trying to access the same `key`. `populating_fn` returns the 
 also, unlike `populating_fn`, a `Option<Arc<V>>` that represents the previous value if present; `.update` then returns
 the updated `V`
 <4> `remove` invalidates the mapping to `key` without proposing a new value. Which is effectively the equivalent of an
-`.update(key, |_, _| None)`.
+`.update(key, |_, _| None)`. I wonder if this is even necesary... it's here tho!
