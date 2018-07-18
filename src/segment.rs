@@ -65,7 +65,7 @@ where
             let (index, to_remove) = self.evictor.add(entry.key().clone());
             let cache_entry = entry.insert(CacheEntry {
               value: Arc::new(value),
-              index: index,
+              index,
             });
             (Some(cache_entry.value.clone()), to_remove)
           }
@@ -105,7 +105,7 @@ where
             let (index, to_remove) = self.evictor.add(*entry.key());
             let cache_entry = entry.insert(CacheEntry {
               value: Arc::new(value),
-              index: index,
+              index,
             });
             (Some(cache_entry.value.clone()), to_remove)
           }

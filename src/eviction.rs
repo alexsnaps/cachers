@@ -30,7 +30,7 @@ pub struct ClockEvictor<K> {
 impl<K> ClockEvictor<K> {
   pub fn new(capacity: usize) -> ClockEvictor<K> {
     ClockEvictor {
-      capacity: capacity,
+      capacity,
       current_pos: 0,
       clock: RwLock::new(vec![false; capacity]),
       mapping: HashMap::with_capacity(capacity),

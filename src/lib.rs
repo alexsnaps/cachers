@@ -186,7 +186,7 @@ mod tests {
       assert_eq!(cache.len(), 1);
       cache.get(2, populate);
       cache.get(3, populate);
-      // cache.get(4, populate); // todo: don't panic, evict!!!
+      cache.get(4, populate);
     }
   }
 
