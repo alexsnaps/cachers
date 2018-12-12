@@ -68,8 +68,7 @@ where
   where
     F: Fn(&K, Option<V>) -> Option<V>,
   {
-    let mut remove_entry = false;
-    let (option, key_evicted) = match self.data.entry(key) {
+    let (remove_entry, option, key_evicted) = match self.data.entry(key) {
       Entry::Occupied(mut entry) => {
         let cache_value = match entry.get_mut() {
           CacheEntry::Value(entry) => entry,
@@ -80,11 +79,10 @@ where
           Some(value) => {
             cache_value.value = value;
             self.evictor.touch(cache_value.index);
-            (Some(cache_value.value.clone()), None)
+            (false, Some(cache_value.value.clone()), None)
           }
           None => {
-            remove_entry = true;
-            (None, None)
+            (true, None, None)
           }
         }
       }
@@ -101,7 +99,7 @@ where
           }
           None => (None, None),
         };
-        (option, key_evicted)
+        (false, option, key_evicted)
       }
     };
 
