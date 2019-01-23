@@ -34,7 +34,7 @@ mod segment;
 use std::ops::Fn;
 use std::sync::{Arc, RwLock};
 
-use segment::Segment;
+use crate::segment::Segment;
 
 /// A thread-safe cache that will populate entries on misses using the provided
 /// function, aka a cache-through cache. Uses interior mutability, which means you can simply

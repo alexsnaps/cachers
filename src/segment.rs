@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use eviction::ClockEvictor;
-use eviction::Evictor;
+use crate::eviction::ClockEvictor;
+use crate::eviction::Evictor;
 use std;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
