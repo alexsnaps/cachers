@@ -368,16 +368,16 @@ mod tests {
 mod bench {
   #![feature(test)]
   extern crate test;
-  use test::Bencher;
   use std::sync::{Arc, Barrier};
   use std::thread;
+  use test::Bencher;
 
   use crate::CacheThrough;
 
   #[bench]
   fn get_100_times_no_eviction_two_threads(b: &mut Bencher) {
-    let cache_size = 1000;
-    let cache: Arc<CacheThrough<i32, String>> = Arc::new(CacheThrough::new(cache_size));
+    let cache_size: i32 = 1000;
+    let cache: Arc<CacheThrough<i32, String>> = Arc::new(CacheThrough::new(cache_size as usize));
     let our_key = 42;
 
     let barrier = Arc::new(Barrier::new(2));
@@ -385,17 +385,25 @@ mod bench {
     let other_cache = cache.clone();
     let other_barrier = barrier.clone();
     let t = thread::spawn(move || {
+      for warmup in 0..our_key {
+        other_cache
+          .get(warmup, |key| Some(key.to_string()))
+          .expect("We had a miss?!");
+      }
       let value = other_cache.get(our_key, |key| Some(key.to_string())); // miss, so populating
       for iteration in 0..10000 {
         {
-          let key = (iteration % cache_size) as i32;
-          if key % 4 == 0 {
-            other_cache.update(key, |key, _| Some(key.to_string()));
+          other_cache.get(our_key, |_| unimplemented!()).expect("We had a miss?!");
+          if iteration % 4 == 0 {
+            other_cache
+              .update(iteration, |key, _| Some(key.to_string()))
+              .expect("We had a miss?!");
           } else {
-            other_cache.get(key, |key| Some(key.to_string()));
+            other_cache
+              .get(iteration as i32, |key| Some(key.to_string()))
+              .expect("We had a miss?!");
           }
-          let value = other_cache.get(our_key, |_| unimplemented!()); // entry should be there!
-          if iteration == cache_size {
+          if iteration == cache_size / 100 {
             barrier.wait(); // let the other thread proceed
           }
         }
@@ -404,7 +412,7 @@ mod bench {
     other_barrier.wait(); // wait for the other thread to populate
     b.iter(|| {
       for _ in 0..100 {
-        let value = cache.get(our_key, |key| Some(key.to_string())); // entry should be there!
+        cache.get(our_key, |_| unimplemented!()).expect("We had a miss?!"); // entry should be there!
       }
     });
     t.join().unwrap();
