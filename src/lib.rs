@@ -374,47 +374,51 @@ mod bench {
   use crate::CacheThrough;
 
   #[bench]
-  fn get_100_times_no_eviction_two_threads(b: &mut Bencher) {
-    let cache_size: i32 = 1000;
+  fn get_100_times_with_eviction_two_threads(b: &mut Bencher) {
+    let cache_size: i32 = 1_000;
     let cache: Arc<CacheThrough<i32, Arc<String>>> = Arc::new(CacheThrough::new(cache_size as usize));
     let our_key = 42;
+    for warmup in 0..our_key {
+      cache
+        .get(warmup, |key| Some(Arc::new(key.to_string())))
+        .expect("Should have populated");
+    }
+    cache
+      .get(our_key, |key| Some(Arc::new(key.to_string())))
+      .expect("Should have populated our key!");
 
     let barrier = Arc::new(Barrier::new(2));
 
     let other_cache = cache.clone();
     let other_barrier = barrier.clone();
-    let t = thread::spawn(move || {
-      for warmup in 0..our_key {
-        other_cache
-          .get(warmup, |key| Some(Arc::new(key.to_string())))
-          .expect("We had a miss?!");
-      }
-      let _value = other_cache.get(our_key, |key| Some(Arc::new(key.to_string()))); // miss, so
-                                                                                    // populating
-      for iteration in 0..10000 {
+    let noisy_thread = thread::spawn(move || {
+      for iteration in our_key..100_000 {
         {
-          other_cache.get(our_key, |_| unimplemented!()).expect("We had a miss?!");
-          if iteration % 4 == 0 {
+          other_cache.get(our_key, |_| None).expect("We should keep our key warm");
+          if (iteration + 1) % 2 == 0 {
             other_cache
               .update(iteration, |key, _| Some(Arc::new(key.to_string())))
-              .expect("We had a miss?!");
+              .expect("Should have updated (insert & eviction");
           } else {
             other_cache
-              .get(iteration as i32, |key| Some(Arc::new(key.to_string())))
-              .expect("We had a miss?!");
+              .get(iteration % cache_size as i32, |key| Some(Arc::new(key.to_string())))
+              .expect("Should have populated or hit noise");
           }
-          if iteration == cache_size / 100 {
+          if iteration == cache_size {
             barrier.wait(); // let the other thread proceed
           }
         }
       }
     });
     other_barrier.wait(); // wait for the other thread to populate
-    b.iter(|| {
-      for _ in 0..100 {
-        cache.get(our_key, |_| unimplemented!()).expect("We had a miss?!"); // entry should be there!
-      }
-    });
-    t.join().unwrap();
+    for _ in 0..3 {
+      b.iter(|| {
+        for _ in 0..100 {
+          cache.get(our_key, |_| None);
+        }
+      });
+    }
+    noisy_thread.join().unwrap();
+    assert_eq!(cache.len(), cache_size as usize);
   }
 }

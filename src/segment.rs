@@ -81,9 +81,7 @@ where
             self.evictor.touch(cache_value.index);
             (false, Some(cache_value.value.clone()), None)
           }
-          None => {
-            (true, None, None)
-          }
+          None => (true, None, None),
         }
       }
       Entry::Vacant(entry) => {
