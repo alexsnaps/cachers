@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg_attr(feature = "unstable", feature(test))]
+
 //! # Cachers [WIP!]
 //!
 //! `cachers` is a library for in-memory caching in Rust.
@@ -113,8 +115,12 @@ where
     if let Some(value) = self.data.read().unwrap().get(&key) {
       return Some(value);
     }
-
-    self.data.write().unwrap().get_or_populate(key, populating_fn)
+    let option = self.data.write();
+    if option.is_ok() {
+      let mut guard = option.unwrap();
+      return guard.get_or_populate(key, populating_fn);
+    }
+    None
   }
 
   /// Updates an entry in the cache, or populates it if absent.
@@ -355,5 +361,60 @@ mod tests {
   fn do_not_invoke(_key: &i32) -> Option<String> {
     assert_eq!("", "I shall not be invoked!");
     None
+  }
+}
+
+#[cfg(all(feature = "unstable", test))]
+mod bench {
+  #![feature(test)]
+  extern crate test;
+  use std::sync::{Arc, Barrier};
+  use std::thread;
+  use test::Bencher;
+
+  use crate::CacheThrough;
+
+  #[bench]
+  fn get_100_times_no_eviction_two_threads(b: &mut Bencher) {
+    let cache_size: i32 = 1000;
+    let cache: Arc<CacheThrough<i32, String>> = Arc::new(CacheThrough::new(cache_size as usize));
+    let our_key = 42;
+
+    let barrier = Arc::new(Barrier::new(2));
+
+    let other_cache = cache.clone();
+    let other_barrier = barrier.clone();
+    let t = thread::spawn(move || {
+      for warmup in 0..our_key {
+        other_cache
+          .get(warmup, |key| Some(key.to_string()))
+          .expect("We had a miss?!");
+      }
+      let value = other_cache.get(our_key, |key| Some(key.to_string())); // miss, so populating
+      for iteration in 0..10000 {
+        {
+          other_cache.get(our_key, |_| unimplemented!()).expect("We had a miss?!");
+          if iteration % 4 == 0 {
+            other_cache
+              .update(iteration, |key, _| Some(key.to_string()))
+              .expect("We had a miss?!");
+          } else {
+            other_cache
+              .get(iteration as i32, |key| Some(key.to_string()))
+              .expect("We had a miss?!");
+          }
+          if iteration == cache_size / 100 {
+            barrier.wait(); // let the other thread proceed
+          }
+        }
+      }
+    });
+    other_barrier.wait(); // wait for the other thread to populate
+    b.iter(|| {
+      for _ in 0..100 {
+        cache.get(our_key, |_| unimplemented!()).expect("We had a miss?!"); // entry should be there!
+      }
+    });
+    t.join().unwrap();
   }
 }
