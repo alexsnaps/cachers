@@ -1,6 +1,7 @@
 .cargo_test_template: &cargo_test
   stage: test
   script:
+    - cargo fmt --all -- --check
     - cargo test --verbose
 
 stable:cargo:
