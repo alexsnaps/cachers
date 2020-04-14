@@ -12,8 +12,17 @@ description = "A caching library"
 edition = "2018"
 
 [dependencies]
+lazy_static = "1.4.0"
 
 [dev-dependencies]
 
 [features]
 unstable = []
+
+[lib]
+name = "cachers"
+path = "src/lib.rs"
+
+[[bin]]
+name = "example"
+path = "src/example.rs"
