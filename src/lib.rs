@@ -366,7 +366,6 @@ mod tests {
 
 #[cfg(all(feature = "unstable", test))]
 mod bench {
-  #![feature(test)]
   extern crate test;
   use std::sync::{Arc, Barrier};
   use std::thread;
@@ -390,7 +389,7 @@ mod bench {
           .get(warmup, |key| Some(key.to_string()))
           .expect("We had a miss?!");
       }
-      let value = other_cache.get(our_key, |key| Some(key.to_string())); // miss, so populating
+      let _value = other_cache.get(our_key, |key| Some(key.to_string())); // miss, so populating
       for iteration in 0..10000 {
         {
           other_cache.get(our_key, |_| unimplemented!()).expect("We had a miss?!");
