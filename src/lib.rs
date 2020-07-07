@@ -30,7 +30,7 @@
 //! This is all very much _work in progress_. Fundamentally, it's just me having fun with Rust...
 //!
 
-mod asynchronous;
+pub mod asynchronous;
 mod eviction;
 mod segment;
 mod segment2;

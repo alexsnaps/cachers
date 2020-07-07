@@ -1,6 +1,6 @@
 use futures::future::Future;
 use std::ops::Fn;
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 
 use crate::segment2::Segment;
 
@@ -51,7 +51,7 @@ where
     let option = self.data.write();
     if option.is_ok() {
       let mut guard = option.unwrap();
-      return guard.get_or_populate(key, |k| futures::executor::block_on(populating_fn(*k)));
+      return guard.get_or_populate(key, populating_fn).await;
     }
     None
   }
@@ -91,7 +91,6 @@ where
 #[cfg(test)]
 mod tests {
   use super::CacheThrough;
-  use std::sync::Arc;
 
   fn test_cache() -> CacheThrough<i32, String> {
     CacheThrough::new(3)
@@ -128,9 +127,9 @@ mod tests {
       let value = cache.get(our_key, populate).await;
       assert_eq!(value.unwrap(), "42");
       assert_eq!(cache.len(), 1);
-      cache.get(2, populate);
-      cache.get(3, populate);
-      cache.get(4, populate);
+      cache.get(2, populate).await;
+      cache.get(3, populate).await;
+      cache.get(4, populate).await;
     }
   }
 
@@ -298,60 +297,5 @@ mod tests {
 
   async fn do_not_invoke(_key: i32) -> Option<String> {
     panic!("I shall not be invoked!");
-    None
   }
 }
-
-// #[cfg(all(feature = "unstable", test))]
-// mod bench {
-//   extern crate test;
-//   use std::sync::{Arc, Barrier};
-//   use std::thread;
-//   use test::Bencher;
-
-//   use crate::CacheThrough;
-
-//   #[bench]
-//   fn get_100_times_no_eviction_two_threads(b: &mut Bencher) {
-//     let cache_size: i32 = 1000;
-//     let cache: Arc<CacheThrough<i32, String>> = Arc::new(CacheThrough::new(cache_size as usize));
-//     let our_key = 42;
-
-//     let barrier = Arc::new(Barrier::new(2));
-
-//     let other_cache = cache.clone();
-//     let other_barrier = barrier.clone();
-//     let t = thread::spawn(move || {
-//       for warmup in 0..our_key {
-//         other_cache
-//           .get(warmup, |key| Some(key.to_string()))
-//           .expect("We had a miss?!");
-//       }
-//       let _value = other_cache.get(our_key, |key| Some(key.to_string())); // miss, so populating
-//       for iteration in 0..10000 {
-//         {
-//           other_cache.get(our_key, |_| unimplemented!()).expect("We had a miss?!");
-//           if iteration % 4 == 0 {
-//             other_cache
-//               .update(iteration, |key, _| Some(key.to_string()))
-//               .expect("We had a miss?!");
-//           } else {
-//             other_cache
-//               .get(iteration as i32, |key| Some(key.to_string()))
-//               .expect("We had a miss?!");
-//           }
-//           if iteration == cache_size / 100 {
-//             barrier.wait(); // let the other thread proceed
-//           }
-//         }
-//       }
-//     });
-//     other_barrier.wait(); // wait for the other thread to populate
-//     b.iter(|| {
-//       for _ in 0..100 {
-//         cache.get(our_key, |_| unimplemented!()).expect("We had a miss?!"); // entry should be there!
-//       }
-//     });
-//     t.join().unwrap();
-//   }
-// }
