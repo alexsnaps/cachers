@@ -54,7 +54,7 @@ where
   pub async fn get_or_populate<Fut, F>(&mut self, key: K, populating_fn: F) -> Fut::Output
   where
     F: Fn(K) -> Fut,
-    Fut: Future<Output=Option<V>>,
+    Fut: Future<Output = Option<V>>,
   {
     let (option, key_evicted) = match self.data.entry(key) {
       Entry::Occupied(entry) => {
@@ -85,12 +85,13 @@ where
     option
   }
 
-  pub fn update<F>(&mut self, key: K, updating_fn: F) -> Option<V>
+  pub async fn update<Fut, F>(&mut self, key: K, updating_fn: F) -> Fut::Output
   where
-    F: Fn(&K, Option<V>) -> Option<V>,
+    F: Fn(K, Option<V>) -> Fut,
+    Fut: Future<Output = Option<V>>,
   {
     let (option, key_evicted) = match self.data.entry(key) {
-      Entry::Occupied(mut entry) => match updating_fn(entry.key(), Some(entry.get().value.clone())) {
+      Entry::Occupied(mut entry) => match updating_fn(*entry.key(), Some(entry.get().value.clone())).await {
         Some(value) => {
           let cache_entry = entry.get_mut();
           cache_entry.value = value.clone();
@@ -103,7 +104,7 @@ where
         }
       },
       Entry::Vacant(entry) => {
-        let (option, key_evicted) = match updating_fn(entry.key(), None) {
+        let (option, key_evicted) = match updating_fn(*entry.key(), None).await {
           Some(value) => {
             let (index, to_remove) = self.evictor.add(*entry.key());
             let cache_entry = entry.insert(CacheEntry {
@@ -186,87 +187,87 @@ mod tests {
     }
   }
 
-  // #[test]
-  // fn update_populates() {
-  //   let mut segment: Segment<i32, String> = test_segment();
-  //   let our_key = 42;
+  #[tokio::test]
+  async fn update_populates() {
+    let mut segment: Segment<i32, String> = test_segment();
+    let our_key = 42;
 
-  //   {
-  //     let value = segment.update(our_key, upsert);
-  //     assert_eq!(value.unwrap(), "42");
-  //     assert_eq!(segment.len(), 1);
-  //   }
+    {
+      let value = segment.update(our_key, upsert).await;
+      assert_eq!(value.unwrap(), "42");
+      assert_eq!(segment.len(), 1);
+    }
 
-  //   {
-  //     let value = segment.get_or_populate(our_key, do_not_invoke);
-  //     assert_eq!(value.unwrap(), "42");
-  //     assert_eq!(segment.len(), 1);
-  //   }
-  // }
+    {
+      let value = segment.get_or_populate(our_key, do_not_invoke).await;
+      assert_eq!(value.unwrap(), "42");
+      assert_eq!(segment.len(), 1);
+    }
+  }
 
-  // #[test]
-  // fn update_updates() {
-  //   let mut segment: Segment<i32, String> = test_segment();
-  //   let our_key = 42;
+  #[tokio::test]
+  async fn update_updates() {
+    let mut segment: Segment<i32, String> = test_segment();
+    let our_key = 42;
 
-  //   {
-  //     let value = segment.get_or_populate(our_key, populate);
-  //     assert_eq!(value.unwrap(), "42");
-  //     assert_eq!(segment.len(), 1);
-  //   }
+    {
+      let value = segment.get_or_populate(our_key, populate).await;
+      assert_eq!(value.unwrap(), "42");
+      assert_eq!(segment.len(), 1);
+    }
 
-  //   {
-  //     let value = segment.update(our_key, update);
-  //     assert_eq!(value.unwrap(), "42 updated!");
-  //     assert_eq!(segment.len(), 1);
-  //   }
+    {
+      let value = segment.update(our_key, update).await;
+      assert_eq!(value.unwrap(), "42 updated!");
+      assert_eq!(segment.len(), 1);
+    }
 
-  //   {
-  //     let value = segment.get_or_populate(our_key, do_not_invoke);
-  //     assert_eq!(value.unwrap(), "42 updated!");
-  //     assert_eq!(segment.len(), 1);
-  //   }
-  // }
+    {
+      let value = segment.get_or_populate(our_key, do_not_invoke).await;
+      assert_eq!(value.unwrap(), "42 updated!");
+      assert_eq!(segment.len(), 1);
+    }
+  }
 
-  // #[test]
-  // fn update_evicts() {
-  //   let mut segment: Segment<i32, String> = test_segment();
-  //   let our_key = 42;
-  //   {
-  //     let value = segment.update(our_key, upsert);
-  //     assert_eq!(value.unwrap(), "42");
-  //     assert_eq!(segment.len(), 1);
-  //     segment.update(2, upsert);
-  //     segment.update(3, upsert);
-  //     assert_eq!(segment.len(), 3);
-  //     segment.update(4, upsert);
-  //     assert_eq!(segment.len(), 3);
-  //   }
-  // }
+  #[tokio::test]
+  async fn update_evicts() {
+    let mut segment: Segment<i32, String> = test_segment();
+    let our_key = 42;
+    {
+      let value = segment.update(our_key, upsert).await;
+      assert_eq!(value.unwrap(), "42");
+      assert_eq!(segment.len(), 1);
+      segment.update(2, upsert).await;
+      segment.update(3, upsert).await;
+      assert_eq!(segment.len(), 3);
+      segment.update(4, upsert).await;
+      assert_eq!(segment.len(), 3);
+    }
+  }
 
-  // #[test]
-  // fn update_removes() {
-  //   let mut segment: Segment<i32, String> = test_segment();
-  //   let our_key = 42;
+  #[tokio::test]
+  async fn update_removes() {
+    let mut segment: Segment<i32, String> = test_segment();
+    let our_key = 42;
 
-  //   {
-  //     let value = segment.get_or_populate(our_key, populate);
-  //     assert_eq!(value.unwrap(), "42");
-  //     assert_eq!(segment.len(), 1);
-  //   }
+    {
+      let value = segment.get_or_populate(our_key, populate).await;
+      assert_eq!(value.unwrap(), "42");
+      assert_eq!(segment.len(), 1);
+    }
 
-  //   {
-  //     let value = segment.update(our_key, updel);
-  //     assert_eq!(value, None);
-  //     assert_eq!(segment.len(), 0);
-  //   }
+    {
+      let value = segment.update(our_key, updel).await;
+      assert_eq!(value, None);
+      assert_eq!(segment.len(), 0);
+    }
 
-  //   {
-  //     let value = segment.get_or_populate(our_key, miss);
-  //     assert_eq!(value, None);
-  //     assert_eq!(segment.len(), 0);
-  //   }
-  // }
+    {
+      let value = segment.get_or_populate(our_key, miss).await;
+      assert_eq!(value, None);
+      assert_eq!(segment.len(), 0);
+    }
+  }
 
   async fn miss(_key: i32) -> Option<String> {
     None

@@ -69,17 +69,13 @@ where
     F: Fn(K, Option<V>) -> Fut,
     Fut: Future<Output = Option<V>>,
   {
-    self
-      .data
-      .write()
-      .unwrap()
-      .update(key, |k, v| futures::executor::block_on(updating_fn(*k, v)))
+    self.data.write().unwrap().update(key, updating_fn).await
   }
 
-  // /// Removes the entry for `key` from the cache.
-  // /// This is the equivalent of `cache.update(key, |_, _| None)`. Consider this a convenience method.
-  pub fn remove(&self, key: K) {
-    self.data.write().unwrap().update(key, |_, _| None);
+  /// Removes the entry for `key` from the cache.
+  /// This is the equivalent of `cache.update(key, |_, _| None)`. Consider this a convenience method.
+  pub async fn remove(&self, key: K) {
+    self.data.write().unwrap().update(key, |_, _| async { None }).await;
   }
 
   #[cfg(test)]
@@ -211,7 +207,7 @@ mod tests {
     }
 
     {
-      cache.remove(our_key);
+      cache.remove(our_key).await;
       assert_eq!(cache.len(), 0);
     }
   }
