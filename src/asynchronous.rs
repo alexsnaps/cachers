@@ -1,6 +1,6 @@
+use futures::future::Future;
 use std::ops::Fn;
 use std::sync::{Arc, RwLock};
-use futures::future::Future;
 
 use crate::segment2::Segment;
 
@@ -42,7 +42,7 @@ where
   pub async fn get<Fut, F>(&self, key: K, populating_fn: F) -> Fut::Output
   where
     F: Fn(K) -> Fut,
-    Fut: Future<Output=Option<V>>,
+    Fut: Future<Output = Option<V>>,
   {
     if let Some(value) = self.data.read().unwrap().get(&key) {
       return Some(value);
@@ -51,7 +51,7 @@ where
     let option = self.data.write();
     if option.is_ok() {
       let mut guard = option.unwrap();
-      return guard.get_or_populate(key, |k| { futures::executor::block_on(populating_fn(*k)) });
+      return guard.get_or_populate(key, |k| futures::executor::block_on(populating_fn(*k)));
     }
     None
   }
@@ -67,9 +67,13 @@ where
   pub async fn update<Fut, F>(&self, key: K, updating_fn: F) -> Option<V>
   where
     F: Fn(K, Option<V>) -> Fut,
-    Fut: Future<Output=Option<V>>,
+    Fut: Future<Output = Option<V>>,
   {
-    self.data.write().unwrap().update(key, |k, v| { futures::executor::block_on(updating_fn(*k, v)) } )
+    self
+      .data
+      .write()
+      .unwrap()
+      .update(key, |k, v| futures::executor::block_on(updating_fn(*k, v)))
   }
 
   // /// Removes the entry for `key` from the cache.

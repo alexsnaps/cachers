@@ -30,9 +30,9 @@
 //! This is all very much _work in progress_. Fundamentally, it's just me having fun with Rust...
 //!
 
+mod asynchronous;
 mod eviction;
 mod segment;
-mod asynchronous;
 mod segment2;
 
 use std::ops::Fn;
