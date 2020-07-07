@@ -64,12 +64,13 @@ where
   ///
   /// It is guaranteed that the mapping will not be altered by another thread while the
   /// `populating_fn` executes.
-  // pub fn update<F>(&self, key: K, updating_fn: F) -> Option<Arc<V>>
-  // where
-  //   F: Fn(&K, Option<Arc<V>>) -> Option<V>,
-  // {
-  //   self.data.write().unwrap().update(key, updating_fn)
-  // }
+  pub async fn update<Fut, F>(&self, key: K, updating_fn: F) -> Option<V>
+  where
+    F: Fn(K, Option<V>) -> Fut,
+    Fut: Future<Output=Option<V>>,
+  {
+    self.data.write().unwrap().update(key, |k, v| { futures::executor::block_on(updating_fn(*k, v)) } )
+  }
 
   // /// Removes the entry for `key` from the cache.
   // /// This is the equivalent of `cache.update(key, |_, _| None)`. Consider this a convenience method.
@@ -129,71 +130,71 @@ mod tests {
     }
   }
 
-  // #[test]
-  // fn update_populates() {
-  //   let cache: CacheThrough<i32, String> = test_cache();
-  //   let our_key = 42;
+  #[tokio::test]
+  async fn update_populates() {
+    let cache: CacheThrough<i32, String> = test_cache();
+    let our_key = 42;
 
-  //   {
-  //     let value = cache.update(our_key, upsert);
-  //     assert_eq!(value.unwrap(), "42");
-  //     assert_eq!(cache.len(), 1);
-  //   }
+    {
+      let value = cache.update(our_key, upsert).await;
+      assert_eq!(value.unwrap(), "42");
+      assert_eq!(cache.len(), 1);
+    }
 
-  //   {
-  //     let value = cache.get(our_key, do_not_invoke);
-  //     assert_eq!(value.unwrap(), "42");
-  //     assert_eq!(cache.len(), 1);
-  //   }
-  // }
+    {
+      let value = cache.get(our_key, do_not_invoke).await;
+      assert_eq!(value.unwrap(), "42");
+      assert_eq!(cache.len(), 1);
+    }
+  }
 
-  // #[test]
-  // fn update_updates() {
-  //   let cache: CacheThrough<i32, String> = test_cache();
-  //   let our_key = 42;
+  #[tokio::test]
+  async fn update_updates() {
+    let cache: CacheThrough<i32, String> = test_cache();
+    let our_key = 42;
 
-  //   {
-  //     let value = cache.get(our_key, populate);
-  //     assert_eq!(value.unwrap(), "42");
-  //     assert_eq!(cache.len(), 1);
-  //   }
+    {
+      let value = cache.get(our_key, populate).await;
+      assert_eq!(value.unwrap(), "42");
+      assert_eq!(cache.len(), 1);
+    }
 
-  //   {
-  //     let value = cache.update(our_key, update);
-  //     assert_eq!(value.unwrap(), "42 updated!");
-  //     assert_eq!(cache.len(), 1);
-  //   }
+    {
+      let value = cache.update(our_key, update).await;
+      assert_eq!(value.unwrap(), "42 updated!");
+      assert_eq!(cache.len(), 1);
+    }
 
-  //   {
-  //     let value = cache.get(our_key, do_not_invoke);
-  //     assert_eq!(value.unwrap(), "42 updated!");
-  //     assert_eq!(cache.len(), 1);
-  //   }
-  // }
+    {
+      let value = cache.get(our_key, do_not_invoke).await;
+      assert_eq!(value.unwrap(), "42 updated!");
+      assert_eq!(cache.len(), 1);
+    }
+  }
 
-  // #[test]
-  // fn update_removes() {
-  //   let cache: CacheThrough<i32, String> = test_cache();
-  //   let our_key = 42;
+  #[tokio::test]
+  async fn update_removes() {
+    let cache: CacheThrough<i32, String> = test_cache();
+    let our_key = 42;
 
-  //   {
-  //     let value = cache.get(our_key, populate);
-  //     assert_eq!(value.unwrap(), "42");
-  //     assert_eq!(cache.len(), 1);
-  //   }
+    {
+      let value = cache.get(our_key, populate).await;
+      assert_eq!(value.unwrap(), "42");
+      assert_eq!(cache.len(), 1);
+    }
 
-  //   {
-  //     let value = cache.update(our_key, updel);
-  //     assert_eq!(value, None);
-  //     assert_eq!(cache.len(), 0);
-  //   }
+    {
+      let value = cache.update(our_key, updel).await;
+      assert_eq!(value, None);
+      assert_eq!(cache.len(), 0);
+    }
 
-  //   {
-  //     let value = cache.get(our_key, miss);
-  //     assert_eq!(value, None);
-  //     assert_eq!(cache.len(), 0);
-  //   }
-  // }
+    {
+      let value = cache.get(our_key, miss).await;
+      assert_eq!(value, None);
+      assert_eq!(cache.len(), 0);
+    }
+  }
 
   #[tokio::test]
   async fn remove_removes() {
@@ -276,20 +277,20 @@ mod tests {
     Some(key.to_string())
   }
 
-  // async fn upsert(key: &i32, value: Option<String>) -> Option<String> {
-  //   assert_eq!(value, None);
-  //   populate(key)
-  // }
+  async fn upsert(key: i32, value: Option<String>) -> Option<String> {
+    assert_eq!(value, None);
+    populate(key).await
+  }
 
-  // async fn update(_key: &i32, value: Option<String>) -> Option<String> {
-  //   let previous = &value.unwrap();
-  //   Some(previous.clone() + " updated!")
-  // }
+  async fn update(_key: i32, value: Option<String>) -> Option<String> {
+    let previous = &value.unwrap();
+    Some(previous.clone() + " updated!")
+  }
 
-  // async fn updel(_key: &i32, value: Option<String>) -> Option<String> {
-  //   assert!(value.is_some());
-  //   None
-  // }
+  async fn updel(_key: i32, value: Option<String>) -> Option<String> {
+    assert!(value.is_some());
+    None
+  }
 
   async fn do_not_invoke(_key: i32) -> Option<String> {
     panic!("I shall not be invoked!");
