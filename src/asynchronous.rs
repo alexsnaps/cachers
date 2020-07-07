@@ -38,19 +38,21 @@ where
   /// guarantees are made about how many times the `populating_fn` may be called.
   ///
   /// If you want to cache misses, consider wrapping your `V` into an `Option`.
-  pub fn get<F>(&self, key: K, populating_fn: F) -> Option<Arc<V>>
+  pub async fn get<Fut, F>(&self, key: K, populating_fn: F) -> Fut::Output
   where
-    F: Future<Output=Option<V>>,
+    F: FnOnce(K) -> Fut,
+    Fut: Future,
   {
-    if let Some(value) = self.data.read().unwrap().get(&key) {
-      return Some(value);
-    }
-    let option = self.data.write();
-    if option.is_ok() {
-      let mut guard = option.unwrap();
-      return guard.get_or_populate(key, populating_fn);
-    }
-    None
+    return populating_fn(key).await;
+    // if let Some(value) = self.data.read().unwrap().get(&key) {
+    //   return Some(value);
+    // }
+    // let option = self.data.write();
+    // if option.is_ok() {
+    //   let mut guard = option.unwrap();
+    //   return guard.get_or_populate(key, populating_fn);
+    // }
+    // None
   }
 
   /// Updates an entry in the cache, or populates it if absent.
@@ -85,6 +87,7 @@ where
 mod tests {
   use super::CacheThrough;
   use std::sync::Arc;
+  use futures::future::Future;
 
   fn test_cache() -> CacheThrough<i32, String> {
     CacheThrough::new(3)
@@ -92,25 +95,54 @@ mod tests {
 
   #[tokio::test]
   async fn hit_populates() {
-    let cache = CacheThrough<i32, String> = test_cache();
+    let cache = test_cache();
+    let our_key = 42;
+
+    {
+      let value = cache.get(our_key, populate).await;
+      assert_eq!(value.unwrap(), "42");
+      // assert_eq!(cache.len(), 1); // TODO
+    }
+
+    {
+      let value = cache.get(our_key, do_not_invoke).await;
+      assert_eq!(value.unwrap(), "42");
+      // assert_eq!(cache.len(), 1); // TODO
+    }
   }
 
-//   #[test]
-//   fn hit_populates() {
-//     let cache: CacheThrough<i32, String> = test_cache();
-//     let our_key = 42;
-//     {
-//       let value = cache.get(our_key, populate);
-//       assert_eq!(*value.unwrap(), "42");
-//       assert_eq!(cache.len(), 1);
-//     }
+  #[tokio::test]
+  async fn miss_populates_not() {
+    let cache: CacheThrough<i32, String> = test_cache();
+    let our_key = 42;
+    {
+      let value = cache.get(our_key, miss).await;
+      assert_eq!(value, None);
+      assert_eq!(cache.len(), 0);
+    }
 
-//     {
-//       let value = cache.get(our_key, do_not_invoke);
-//       assert_eq!(*value.unwrap(), "42");
-//       assert_eq!(cache.len(), 1);
-//     }
-//   }
+    {
+      let value = cache.get(our_key, populate).await;
+      assert_eq!(value.unwrap(), "42");
+      assert_eq!(cache.len(), 1);
+      cache.get(2, populate);
+      cache.get(3, populate);
+      cache.get(4, populate);
+    }
+  }
+
+  async fn miss(_key: i32) -> Option<String> {
+    None
+  }
+
+  async fn populate(key: i32) -> Option<String> {
+    Some(key.to_string())
+  }
+
+  async fn do_not_invoke(_key: i32) -> Option<String> {
+    panic!("I shall not be invoked!");
+    None
+  }
 
 //   #[test]
 //   fn miss_populates_not() {
