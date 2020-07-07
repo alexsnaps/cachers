@@ -12,8 +12,10 @@ description = "A caching library"
 edition = "2018"
 
 [dependencies]
+futures = { version = "0.3" }
 
 [dev-dependencies]
+tokio = { version = "0.2", features = ["full"] }
 
 [features]
 unstable = []

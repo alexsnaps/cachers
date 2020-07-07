@@ -32,6 +32,7 @@
 
 mod eviction;
 mod segment;
+mod asynchronous;
 
 use std::ops::Fn;
 use std::sync::{Arc, RwLock};
