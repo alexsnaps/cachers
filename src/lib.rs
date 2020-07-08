@@ -34,7 +34,7 @@ mod eviction;
 mod segment;
 
 use std::ops::Fn;
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 
 use crate::segment::Segment;
 
@@ -65,11 +65,11 @@ use crate::segment::Segment;
 /// let t = thread::spawn(move || {
 ///   other_barrier.wait(); // wait for main thread to populate
 ///   let value = other_cache.get(our_key, |_| unimplemented!() ); // entry should be there!
-///   assert_eq!(*value.unwrap(), "42");
+///   assert_eq!(value.unwrap(), "42");
 /// });
 ///
 /// let value = cache.get(our_key, |key| Some(key.to_string()) ); // miss, so populating
-/// assert_eq!(*value.unwrap(), "42");
+/// assert_eq!(value.unwrap(), "42");
 /// barrier.wait(); // let the other thread proceed
 ///
 /// t.join().unwrap();
@@ -81,6 +81,7 @@ pub struct CacheThrough<K, V> {
 impl<K, V> CacheThrough<K, V>
 where
   K: std::cmp::Eq + std::hash::Hash + Copy,
+  V: Clone,
 {
   /// Creates a new `CacheThrough` instance of the given `capacity`
   ///
@@ -108,7 +109,7 @@ where
   /// guarantees are made about how many times the `populating_fn` may be called.
   ///
   /// If you want to cache misses, consider wrapping your `V` into an `Option`.
-  pub fn get<F>(&self, key: K, populating_fn: F) -> Option<Arc<V>>
+  pub fn get<F>(&self, key: K, populating_fn: F) -> Option<V>
   where
     F: Fn(&K) -> Option<V>,
   {
@@ -131,9 +132,9 @@ where
   ///
   /// It is guaranteed that the mapping will not be altered by another thread while the
   /// `populating_fn` executes.
-  pub fn update<F>(&self, key: K, updating_fn: F) -> Option<Arc<V>>
+  pub fn update<F>(&self, key: K, updating_fn: F) -> Option<V>
   where
-    F: Fn(&K, Option<Arc<V>>) -> Option<V>,
+    F: Fn(&K, Option<V>) -> Option<V>,
   {
     self.data.write().unwrap().update(key, updating_fn)
   }
@@ -153,7 +154,6 @@ where
 #[cfg(test)]
 mod tests {
   use super::CacheThrough;
-  use std::sync::Arc;
 
   fn test_cache() -> CacheThrough<i32, String> {
     CacheThrough::new(3)
@@ -165,13 +165,13 @@ mod tests {
     let our_key = 42;
     {
       let value = cache.get(our_key, populate);
-      assert_eq!(*value.unwrap(), "42");
+      assert_eq!(value.unwrap(), "42");
       assert_eq!(cache.len(), 1);
     }
 
     {
       let value = cache.get(our_key, do_not_invoke);
-      assert_eq!(*value.unwrap(), "42");
+      assert_eq!(value.unwrap(), "42");
       assert_eq!(cache.len(), 1);
     }
   }
@@ -188,7 +188,7 @@ mod tests {
 
     {
       let value = cache.get(our_key, populate);
-      assert_eq!(*value.unwrap(), "42");
+      assert_eq!(value.unwrap(), "42");
       assert_eq!(cache.len(), 1);
       cache.get(2, populate);
       cache.get(3, populate);
@@ -203,13 +203,13 @@ mod tests {
 
     {
       let value = cache.update(our_key, upsert);
-      assert_eq!(*value.unwrap(), "42");
+      assert_eq!(value.unwrap(), "42");
       assert_eq!(cache.len(), 1);
     }
 
     {
       let value = cache.get(our_key, do_not_invoke);
-      assert_eq!(*value.unwrap(), "42");
+      assert_eq!(value.unwrap(), "42");
       assert_eq!(cache.len(), 1);
     }
   }
@@ -221,19 +221,19 @@ mod tests {
 
     {
       let value = cache.get(our_key, populate);
-      assert_eq!(*value.unwrap(), "42");
+      assert_eq!(value.unwrap(), "42");
       assert_eq!(cache.len(), 1);
     }
 
     {
       let value = cache.update(our_key, update);
-      assert_eq!(*value.unwrap(), "42 updated!");
+      assert_eq!(value.unwrap(), "42 updated!");
       assert_eq!(cache.len(), 1);
     }
 
     {
       let value = cache.get(our_key, do_not_invoke);
-      assert_eq!(*value.unwrap(), "42 updated!");
+      assert_eq!(value.unwrap(), "42 updated!");
       assert_eq!(cache.len(), 1);
     }
   }
@@ -245,7 +245,7 @@ mod tests {
 
     {
       let value = cache.get(our_key, populate);
-      assert_eq!(*value.unwrap(), "42");
+      assert_eq!(value.unwrap(), "42".to_owned());
       assert_eq!(cache.len(), 1);
     }
 
@@ -269,7 +269,7 @@ mod tests {
 
     {
       let value = cache.get(our_key, populate);
-      assert_eq!(*value.unwrap(), "42");
+      assert_eq!(value.unwrap(), "42");
       assert_eq!(cache.len(), 1);
     }
 
@@ -284,11 +284,11 @@ mod tests {
     let cache: CacheThrough<i32, String> = test_cache();
 
     {
-      assert_eq!(*cache.get(1, populate).unwrap(), "1"); // eviction candidate
+      assert_eq!(cache.get(1, populate).unwrap(), "1"); // eviction candidate
       assert_eq!(cache.len(), 1);
-      assert_eq!(*cache.get(2, populate).unwrap(), "2");
+      assert_eq!(cache.get(2, populate).unwrap(), "2");
       assert_eq!(cache.len(), 2);
-      assert_eq!(*cache.get(3, populate).unwrap(), "3");
+      assert_eq!(cache.get(3, populate).unwrap(), "3");
       assert_eq!(cache.len(), 3);
 
       // Clock state & hand:
@@ -297,40 +297,40 @@ mod tests {
     }
 
     {
-      assert_eq!(*cache.get(4, populate).unwrap(), "4"); // evicts 1
+      assert_eq!(cache.get(4, populate).unwrap(), "4"); // evicts 1
       assert_eq!(cache.len(), 3);
       //  _
       // 100
 
-      assert_eq!(*cache.get(2, do_not_invoke).unwrap(), "2");
+      assert_eq!(cache.get(2, do_not_invoke).unwrap(), "2");
       assert_eq!(cache.len(), 3);
       //  _
       // 110
 
-      assert_eq!(*cache.get(3, do_not_invoke).unwrap(), "3");
+      assert_eq!(cache.get(3, do_not_invoke).unwrap(), "3");
       assert_eq!(cache.len(), 3);
       //  _
       // 111
     }
 
     {
-      assert_eq!(*cache.get(5, populate).unwrap(), "5"); // evicts 3
+      assert_eq!(cache.get(5, populate).unwrap(), "5"); // evicts 3
       assert_eq!(cache.len(), 3);
       //   _
       // 010
 
-      assert_eq!(*cache.get(2, do_not_invoke).unwrap(), "2"); // 011
+      assert_eq!(cache.get(2, do_not_invoke).unwrap(), "2"); // 011
       assert_eq!(cache.len(), 3);
-      assert_eq!(*cache.get(4, do_not_invoke).unwrap(), "4"); // 111
+      assert_eq!(cache.get(4, do_not_invoke).unwrap(), "4"); // 111
       assert_eq!(cache.len(), 3);
     }
 
     {
-      assert_eq!(*cache.get(6, populate).unwrap(), "6"); // evicts 4
+      assert_eq!(cache.get(6, populate).unwrap(), "6"); // evicts 4
       assert_eq!(cache.len(), 3);
-      assert_eq!(*cache.get(5, do_not_invoke).unwrap(), "5");
+      assert_eq!(cache.get(5, do_not_invoke).unwrap(), "5");
       assert_eq!(cache.len(), 3);
-      assert_eq!(*cache.get(2, do_not_invoke).unwrap(), "2");
+      assert_eq!(cache.get(2, do_not_invoke).unwrap(), "2");
       assert_eq!(cache.len(), 3);
     }
   }
@@ -343,17 +343,17 @@ mod tests {
     Some(key.to_string())
   }
 
-  fn upsert(key: &i32, value: Option<Arc<String>>) -> Option<String> {
+  fn upsert(key: &i32, value: Option<String>) -> Option<String> {
     assert_eq!(value, None);
     populate(key)
   }
 
-  fn update(_key: &i32, value: Option<Arc<String>>) -> Option<String> {
-    let previous = &*value.unwrap();
+  fn update(_key: &i32, value: Option<String>) -> Option<String> {
+    let previous = &value.unwrap();
     Some(previous.clone() + " updated!")
   }
 
-  fn updel(_key: &i32, value: Option<Arc<String>>) -> Option<String> {
+  fn updel(_key: &i32, value: Option<String>) -> Option<String> {
     assert!(value.is_some());
     None
   }
