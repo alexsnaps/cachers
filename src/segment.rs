@@ -15,10 +15,12 @@
 use crate::eviction::ClockEvictor;
 use crate::eviction::Evictor;
 use std;
+use std::borrow::BorrowMut;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::ops::Fn;
-use std::sync::RwLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, MutexGuard, RwLock, RwLockWriteGuard, TryLockError};
 
 pub struct Segment<K, V> {
   inner: RwLock<Inner<K, V>>,
@@ -132,7 +134,44 @@ struct CacheValue<V> {
 }
 
 struct SoftLock<V> {
-  value: RwLock<Option<CacheValue<V>>>,
+  inner: RwLock<InnerSoftLock<V>>,
+}
+
+impl<V: Clone> SoftLock<V> {
+  fn is_ready(&self) -> bool {
+    let guard = self.inner.read().unwrap();
+    guard.is_ready()
+  }
+
+  fn lock(&self) -> RwLockWriteGuard<InnerSoftLock<V>> {
+    self.inner.write().unwrap()
+  }
+
+  fn populate<F>(&self, mut guard: RwLockWriteGuard<InnerSoftLock<V>>, value: Option<V>) {
+    guard.populate(value);
+  }
+}
+
+struct InnerSoftLock<V> {
+  ready: bool,
+  value: Option<V>,
+}
+
+impl<V: Clone> InnerSoftLock<V> {
+  fn is_ready(&self) -> bool {
+    self.ready
+  }
+
+  fn value(&self) -> Option<V> {
+    self.value.clone()
+  }
+
+  fn populate(&mut self, value: Option<V>) {
+    if !self.ready {
+      self.value = value;
+      self.ready = true;
+    }
+  }
 }
 
 impl<K, V> Segment<K, V>
