@@ -21,50 +21,20 @@ use std::ops::Fn;
 use std::sync::RwLock;
 
 pub struct Segment<K, V> {
+  inner: RwLock<Inner<K, V>>,
+}
+
+struct Inner<K, V> {
   data: HashMap<K, CacheEntry<V>>,
   evictor: ClockEvictor<K>,
 }
 
-enum CacheEntry<V> {
-  Value(CacheValue<V>),
-  Lock(SoftLock<V>),
-}
-
-struct CacheValue<V> {
-  value: V,
-  index: usize,
-}
-
-struct SoftLock<V> {
-  value: RwLock<Option<CacheValue<V>>>,
-}
-
-impl<K, V> Segment<K, V>
+impl<K, V> Inner<K, V>
 where
   K: std::cmp::Eq + std::hash::Hash + Copy,
   V: Clone,
 {
-  pub fn new(capacity: usize) -> Segment<K, V> {
-    Segment {
-      data: HashMap::new(),
-      evictor: ClockEvictor::new(capacity),
-    }
-  }
-
-  pub fn get(&self, key: &K) -> Option<V> {
-    if let Some(cache_entry) = self.data.get(key) {
-      match cache_entry {
-        CacheEntry::Value(entry) => {
-          self.evictor.touch(entry.index);
-          return Some(entry.value.clone());
-        }
-        CacheEntry::Lock(_) => panic!("Fix me!"), // todo Handle lock
-      }
-    }
-    None
-  }
-
-  pub fn update<F>(&mut self, key: K, updating_fn: F) -> Option<V>
+  fn update<F>(&mut self, key: K, updating_fn: F) -> Option<V>
   where
     F: Fn(&K, Option<V>) -> Option<V>,
   {
@@ -115,7 +85,7 @@ where
     }
   }
 
-  pub fn get_or_populate<F>(&mut self, key: K, populating_fn: F) -> Option<V>
+  fn get_or_populate<F>(&mut self, key: K, populating_fn: F) -> Option<V>
   where
     F: Fn(&K) -> Option<V>,
   {
@@ -149,10 +119,69 @@ where
 
     option
   }
+}
+
+enum CacheEntry<V> {
+  Value(CacheValue<V>),
+  Lock(SoftLock<V>),
+}
+
+struct CacheValue<V> {
+  value: V,
+  index: usize,
+}
+
+struct SoftLock<V> {
+  value: RwLock<Option<CacheValue<V>>>,
+}
+
+impl<K, V> Segment<K, V>
+where
+  K: std::cmp::Eq + std::hash::Hash + Copy,
+  V: Clone,
+{
+  pub fn new(capacity: usize) -> Segment<K, V> {
+    Segment {
+      inner: RwLock::new(Inner {
+        data: HashMap::new(),
+        evictor: ClockEvictor::new(capacity),
+      }),
+    }
+  }
+
+  pub fn get(&self, key: &K) -> Option<V> {
+    let guard = self.inner.read().unwrap();
+    if let Some(cache_entry) = guard.data.get(key) {
+      match cache_entry {
+        CacheEntry::Value(entry) => {
+          guard.evictor.touch(entry.index);
+          return Some(entry.value.clone());
+        }
+        CacheEntry::Lock(_) => panic!("Fix me!"), // todo Handle lock
+      }
+    }
+    None
+  }
+
+  pub fn update<F>(&self, key: K, updating_fn: F) -> Option<V>
+  where
+    F: Fn(&K, Option<V>) -> Option<V>,
+  {
+    let mut guard = self.inner.write().unwrap();
+    guard.update(key, updating_fn)
+  }
+
+  pub fn get_or_populate<F>(&self, key: K, populating_fn: F) -> Option<V>
+  where
+    F: Fn(&K) -> Option<V>,
+  {
+    let mut guard = self.inner.write().unwrap();
+    guard.get_or_populate(key, populating_fn)
+  }
 
   #[cfg(test)]
   pub fn len(&self) -> usize {
-    self.data.len()
+    self.inner.read().unwrap().data.len()
   }
 }
 
@@ -166,7 +195,7 @@ mod tests {
 
   #[test]
   fn hit_populates() {
-    let mut segment: Segment<i32, String> = test_segment();
+    let segment: Segment<i32, String> = test_segment();
     let our_key = 42;
     {
       let value = segment.get_or_populate(our_key, populate);
@@ -183,7 +212,7 @@ mod tests {
 
   #[test]
   fn miss_populates_not() {
-    let mut segment: Segment<i32, String> = test_segment();
+    let segment: Segment<i32, String> = test_segment();
     let our_key = 42;
     {
       let value = segment.get_or_populate(our_key, miss);
@@ -194,7 +223,7 @@ mod tests {
 
   #[test]
   fn get_or_populate_evicts() {
-    let mut segment: Segment<i32, String> = test_segment();
+    let segment: Segment<i32, String> = test_segment();
     let our_key = 42;
     {
       let value = segment.get_or_populate(our_key, populate);
@@ -210,7 +239,7 @@ mod tests {
 
   #[test]
   fn update_populates() {
-    let mut segment: Segment<i32, String> = test_segment();
+    let segment: Segment<i32, String> = test_segment();
     let our_key = 42;
 
     {
@@ -228,7 +257,7 @@ mod tests {
 
   #[test]
   fn update_updates() {
-    let mut segment: Segment<i32, String> = test_segment();
+    let segment: Segment<i32, String> = test_segment();
     let our_key = 42;
 
     {
@@ -252,7 +281,7 @@ mod tests {
 
   #[test]
   fn update_evicts() {
-    let mut segment: Segment<i32, String> = test_segment();
+    let segment: Segment<i32, String> = test_segment();
     let our_key = 42;
     {
       let value = segment.update(our_key, upsert);
@@ -268,7 +297,7 @@ mod tests {
 
   #[test]
   fn update_removes() {
-    let mut segment: Segment<i32, String> = test_segment();
+    let segment: Segment<i32, String> = test_segment();
     let our_key = 42;
 
     {

@@ -103,7 +103,7 @@ mod tests {
 
   #[test]
   fn test_it_works() {
-    let mut evictor = ClockEvictor::new(4);
+    let evictor = ClockEvictor::new(4);
     assert_eq!(evictor.add("1"), (0, None));
     assert_eq!(evictor.add("2"), (1, None));
     assert_eq!(evictor.add("3"), (2, None));
@@ -126,7 +126,7 @@ mod tests {
 
   #[test]
   fn test_hammered_key_never_evicted() {
-    let mut evictor = ClockEvictor::new(4);
+    let evictor = ClockEvictor::new(4);
     assert_eq!(evictor.add(1), (0, None));
     evictor.touch(1); // todo, pathological case where the clock goes full circle!
     assert_eq!(evictor.add(2), (1, None));

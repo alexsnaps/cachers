@@ -118,7 +118,7 @@ where
     }
     let option = self.data.write();
     if option.is_ok() {
-      let mut guard = option.unwrap();
+      let guard = option.unwrap();
       return guard.get_or_populate(key, populating_fn);
     }
     None
