@@ -34,7 +34,6 @@ mod eviction;
 mod segment;
 
 use std::ops::Fn;
-use std::sync::RwLock;
 
 use crate::segment::Segment;
 
@@ -75,7 +74,7 @@ use crate::segment::Segment;
 /// t.join().unwrap();
 /// ```
 pub struct CacheThrough<K, V> {
-  data: RwLock<Segment<K, V>>,
+  data: Segment<K, V>,
 }
 
 impl<K, V> CacheThrough<K, V>
@@ -92,7 +91,7 @@ where
   /// ```
   pub fn new(capacity: usize) -> CacheThrough<K, V> {
     CacheThrough {
-      data: RwLock::new(Segment::new(capacity)),
+      data: Segment::new(capacity),
     }
   }
 
@@ -113,15 +112,10 @@ where
   where
     F: Fn(&K) -> Option<V>,
   {
-    if let Some(value) = self.data.read().unwrap().get(&key) {
+    if let Some(value) = self.data.get(&key) {
       return Some(value);
     }
-    let option = self.data.write();
-    if option.is_ok() {
-      let guard = option.unwrap();
-      return guard.get_or_populate(key, populating_fn);
-    }
-    None
+    self.data.get_or_populate(key, populating_fn)
   }
 
   /// Updates an entry in the cache, or populates it if absent.
@@ -136,18 +130,18 @@ where
   where
     F: Fn(&K, Option<V>) -> Option<V>,
   {
-    self.data.write().unwrap().update(key, updating_fn)
+    self.data.update(key, updating_fn)
   }
 
   /// Removes the entry for `key` from the cache.
   /// This is the equivalent of `cache.update(key, |_, _| None)`. Consider this a convenience method.
   pub fn remove(&self, key: K) {
-    self.data.write().unwrap().update(key, |_, _| None);
+    self.data.update(key, |_, _| None);
   }
 
   #[cfg(test)]
   fn len(&self) -> usize {
-    self.data.read().unwrap().len()
+    self.data.len()
   }
 }
 
