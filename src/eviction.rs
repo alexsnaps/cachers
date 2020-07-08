@@ -16,42 +16,40 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 
 pub trait Evictor<K> {
-  fn add(&mut self, key: K) -> (usize, Option<K>);
+  fn add(&self, key: K) -> (usize, Option<K>);
   fn touch(&self, index: usize);
 }
 
 pub struct ClockEvictor<K> {
+  inner: RwLock<Inner<K>>,
+}
+
+struct Inner<K> {
   capacity: usize,
   current_pos: usize,
   clock: RwLock<Vec<bool>>,
   mapping: HashMap<usize, K>,
 }
 
-impl<K> ClockEvictor<K> {
-  pub fn new(capacity: usize) -> ClockEvictor<K> {
-    ClockEvictor {
-      capacity,
-      current_pos: 0,
-      clock: RwLock::new(vec![false; capacity]),
-      mapping: HashMap::with_capacity(capacity),
-    }
-  }
-
+impl<K> Inner<K> {
   fn victim(&mut self) -> (usize, Option<K>) {
     let flip_and_match = |touched: &mut bool| {
       let victim = !*touched;
       *touched = false;
       victim
     };
-    let mut clock = self.clock.write().unwrap();
+    let offset: usize;
+    {
+      let mut clock = self.clock.write().unwrap();
 
-    let offset = match clock[self.current_pos..].iter_mut().position(flip_and_match) {
-      Some(index) => index,
-      None => match clock[..self.current_pos].iter_mut().position(flip_and_match) {
+      offset = match clock[self.current_pos..].iter_mut().position(flip_and_match) {
         Some(index) => index,
-        None => self.current_pos,
-      },
-    };
+        None => match clock[..self.current_pos].iter_mut().position(flip_and_match) {
+          Some(index) => index,
+          None => self.current_pos,
+        },
+      };
+    }
     let mut index = self.current_pos + offset;
     if index >= self.capacity {
       index %= self.capacity;
@@ -59,24 +57,43 @@ impl<K> ClockEvictor<K> {
     self.current_pos = index + 1;
     (index, self.mapping.remove(&index))
   }
-}
-
-impl<K> Evictor<K> for ClockEvictor<K> {
-  fn add(&mut self, key: K) -> (usize, Option<K>) {
-    let (index, victim) = if self.mapping.len() < self.capacity {
-      (self.mapping.len(), None)
-    } else {
-      self.victim()
-    };
-
-    self.mapping.insert(index, key);
-    self.touch(index);
-    (index, victim)
-  }
 
   fn touch(&self, index: usize) {
     let mut clock = self.clock.write().unwrap();
     clock[index] = true;
+  }
+}
+
+impl<K> ClockEvictor<K> {
+  pub fn new(capacity: usize) -> ClockEvictor<K> {
+    ClockEvictor {
+      inner: RwLock::new(Inner {
+        capacity,
+        current_pos: 0,
+        clock: RwLock::new(vec![false; capacity]),
+        mapping: HashMap::with_capacity(capacity),
+      }),
+    }
+  }
+}
+
+impl<K> Evictor<K> for ClockEvictor<K> {
+  fn add(&self, key: K) -> (usize, Option<K>) {
+    let mut guard = self.inner.write().unwrap();
+
+    let (index, victim) = if guard.mapping.len() < guard.capacity {
+      (guard.mapping.len(), None)
+    } else {
+      guard.victim()
+    };
+
+    guard.mapping.insert(index, key);
+    guard.touch(index);
+    (index, victim)
+  }
+
+  fn touch(&self, index: usize) {
+    self.inner.read().unwrap().touch(index)
   }
 }
 
