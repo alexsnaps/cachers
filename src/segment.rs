@@ -18,7 +18,6 @@ use std;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::ops::Fn;
-use std::sync::Arc;
 
 pub struct Segment<K, V> {
   data: HashMap<K, CacheEntry<V>>,
@@ -26,13 +25,14 @@ pub struct Segment<K, V> {
 }
 
 struct CacheEntry<V> {
-  value: Arc<V>,
+  value: V,
   index: usize,
 }
 
 impl<K, V> Segment<K, V>
 where
   K: std::cmp::Eq + std::hash::Hash + Copy,
+  V: Clone,
 {
   pub fn new(capacity: usize) -> Segment<K, V> {
     Segment {
@@ -41,7 +41,7 @@ where
     }
   }
 
-  pub fn get(&self, key: &K) -> Option<Arc<V>> {
+  pub fn get(&self, key: &K) -> Option<V> {
     if let Some(cache_entry) = self.data.get(key) {
       self.evictor.touch(cache_entry.index);
       return Some(cache_entry.value.clone());
@@ -49,7 +49,7 @@ where
     None
   }
 
-  pub fn get_or_populate<F>(&mut self, key: K, populating_fn: F) -> Option<Arc<V>>
+  pub fn get_or_populate<F>(&mut self, key: K, populating_fn: F) -> Option<V>
   where
     F: Fn(&K) -> Option<V>,
   {
@@ -63,10 +63,7 @@ where
         let (option, to_remove) = match populating_fn(entry.key()) {
           Some(value) => {
             let (index, to_remove) = self.evictor.add(entry.key().clone());
-            let cache_entry = entry.insert(CacheEntry {
-              value: Arc::new(value),
-              index,
-            });
+            let cache_entry = entry.insert(CacheEntry { value, index });
             (Some(cache_entry.value.clone()), to_remove)
           }
           None => (None, None),
@@ -82,15 +79,15 @@ where
     option
   }
 
-  pub fn update<F>(&mut self, key: K, updating_fn: F) -> Option<Arc<V>>
+  pub fn update<F>(&mut self, key: K, updating_fn: F) -> Option<V>
   where
-    F: Fn(&K, Option<Arc<V>>) -> Option<V>,
+    F: Fn(&K, Option<V>) -> Option<V>,
   {
     let (option, key_evicted) = match self.data.entry(key) {
       Entry::Occupied(mut entry) => match updating_fn(entry.key(), Some(entry.get().value.clone())) {
         Some(value) => {
           let cache_entry = entry.get_mut();
-          cache_entry.value = Arc::new(value);
+          cache_entry.value = value;
           self.evictor.touch(cache_entry.index);
           (Some(cache_entry.value.clone()), None)
         }
@@ -103,10 +100,7 @@ where
         let (option, key_evicted) = match updating_fn(entry.key(), None) {
           Some(value) => {
             let (index, to_remove) = self.evictor.add(*entry.key());
-            let cache_entry = entry.insert(CacheEntry {
-              value: Arc::new(value),
-              index,
-            });
+            let cache_entry = entry.insert(CacheEntry { value, index });
             (Some(cache_entry.value.clone()), to_remove)
           }
           None => (None, None),
@@ -134,7 +128,6 @@ where
 #[cfg(test)]
 mod tests {
   use super::Segment;
-  use std::sync::Arc;
 
   fn test_segment() -> Segment<i32, String> {
     Segment::new(3)
@@ -146,13 +139,13 @@ mod tests {
     let our_key = 42;
     {
       let value = segment.get_or_populate(our_key, populate);
-      assert_eq!(*value.unwrap(), "42");
+      assert_eq!(value.unwrap(), "42");
       assert_eq!(segment.len(), 1);
     }
 
     {
       let value = segment.get_or_populate(our_key, do_not_invoke);
-      assert_eq!(*value.unwrap(), "42");
+      assert_eq!(value.unwrap(), "42");
       assert_eq!(segment.len(), 1);
     }
   }
@@ -174,7 +167,7 @@ mod tests {
     let our_key = 42;
     {
       let value = segment.get_or_populate(our_key, populate);
-      assert_eq!(*value.unwrap(), "42");
+      assert_eq!(value.unwrap(), "42");
       assert_eq!(segment.len(), 1);
       segment.get_or_populate(2, populate);
       segment.get_or_populate(3, populate);
@@ -191,13 +184,13 @@ mod tests {
 
     {
       let value = segment.update(our_key, upsert);
-      assert_eq!(*value.unwrap(), "42");
+      assert_eq!(value.unwrap(), "42");
       assert_eq!(segment.len(), 1);
     }
 
     {
       let value = segment.get_or_populate(our_key, do_not_invoke);
-      assert_eq!(*value.unwrap(), "42");
+      assert_eq!(value.unwrap(), "42");
       assert_eq!(segment.len(), 1);
     }
   }
@@ -209,19 +202,19 @@ mod tests {
 
     {
       let value = segment.get_or_populate(our_key, populate);
-      assert_eq!(*value.unwrap(), "42");
+      assert_eq!(value.unwrap(), "42");
       assert_eq!(segment.len(), 1);
     }
 
     {
       let value = segment.update(our_key, update);
-      assert_eq!(*value.unwrap(), "42 updated!");
+      assert_eq!(value.unwrap(), "42 updated!");
       assert_eq!(segment.len(), 1);
     }
 
     {
       let value = segment.get_or_populate(our_key, do_not_invoke);
-      assert_eq!(*value.unwrap(), "42 updated!");
+      assert_eq!(value.unwrap(), "42 updated!");
       assert_eq!(segment.len(), 1);
     }
   }
@@ -232,7 +225,7 @@ mod tests {
     let our_key = 42;
     {
       let value = segment.update(our_key, upsert);
-      assert_eq!(*value.unwrap(), "42");
+      assert_eq!(value.unwrap(), "42");
       assert_eq!(segment.len(), 1);
       segment.update(2, upsert);
       segment.update(3, upsert);
@@ -249,7 +242,7 @@ mod tests {
 
     {
       let value = segment.get_or_populate(our_key, populate);
-      assert_eq!(*value.unwrap(), "42");
+      assert_eq!(value.unwrap(), "42");
       assert_eq!(segment.len(), 1);
     }
 
@@ -274,17 +267,17 @@ mod tests {
     Some(key.to_string())
   }
 
-  fn upsert(key: &i32, value: Option<Arc<String>>) -> Option<String> {
+  fn upsert(key: &i32, value: Option<String>) -> Option<String> {
     assert_eq!(value, None);
     populate(key)
   }
 
-  fn update(_key: &i32, value: Option<Arc<String>>) -> Option<String> {
-    let previous = &*value.unwrap();
+  fn update(_key: &i32, value: Option<String>) -> Option<String> {
+    let previous = &value.unwrap();
     Some(previous.clone() + " updated!")
   }
 
-  fn updel(_key: &i32, value: Option<Arc<String>>) -> Option<String> {
+  fn updel(_key: &i32, value: Option<String>) -> Option<String> {
     assert!(value.is_some());
     None
   }
