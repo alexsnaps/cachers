@@ -34,6 +34,7 @@ pub mod asynchronous;
 mod eviction;
 mod segment;
 mod segment2;
+mod softlock;
 
 use std::ops::Fn;
 use std::sync::{Arc, RwLock};

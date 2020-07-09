@@ -16,11 +16,15 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 
 pub trait Evictor<K> {
-  fn add(&mut self, key: K) -> (usize, Option<K>);
+  fn add(&self, key: K) -> (usize, Option<K>);
   fn touch(&self, index: usize);
 }
 
 pub struct ClockEvictor<K> {
+  inner: RwLock<Inner<K>>,
+}
+
+struct Inner<K> {
   capacity: usize,
   current_pos: usize,
   clock: RwLock<Vec<bool>>,
@@ -30,11 +34,39 @@ pub struct ClockEvictor<K> {
 impl<K> ClockEvictor<K> {
   pub fn new(capacity: usize) -> ClockEvictor<K> {
     ClockEvictor {
-      capacity,
-      current_pos: 0,
-      clock: RwLock::new(vec![false; capacity]),
-      mapping: HashMap::with_capacity(capacity),
+      inner: RwLock::new(Inner {
+        capacity,
+        current_pos: 0,
+        clock: RwLock::new(vec![false; capacity]),
+        mapping: HashMap::with_capacity(capacity),
+      })
     }
+  }
+}
+
+impl<K> Evictor<K> for ClockEvictor<K> {
+  fn add(&self, key: K) -> (usize, Option<K>) {
+    let mut inner = self.inner.write().unwrap();
+    let (index, victim) = if inner.mapping.len() < inner.capacity {
+      (inner.mapping.len(), None)
+    } else {
+      inner.victim()
+    };
+
+    inner.mapping.insert(index, key);
+    inner.touch(index);
+    (index, victim)
+  }
+
+  fn touch(&self, index: usize) {
+    self.inner.read().unwrap().touch(index);
+  }
+}
+
+impl<K> Inner<K> {
+  fn touch(&self, index: usize) {
+    let mut clock = self.clock.write().unwrap();
+    clock[index] = true;
   }
 
   fn victim(&mut self) -> (usize, Option<K>) {
@@ -61,32 +93,13 @@ impl<K> ClockEvictor<K> {
   }
 }
 
-impl<K> Evictor<K> for ClockEvictor<K> {
-  fn add(&mut self, key: K) -> (usize, Option<K>) {
-    let (index, victim) = if self.mapping.len() < self.capacity {
-      (self.mapping.len(), None)
-    } else {
-      self.victim()
-    };
-
-    self.mapping.insert(index, key);
-    self.touch(index);
-    (index, victim)
-  }
-
-  fn touch(&self, index: usize) {
-    let mut clock = self.clock.write().unwrap();
-    clock[index] = true;
-  }
-}
-
 mod tests {
   #[allow(unused_imports)]
   use super::{ClockEvictor, Evictor};
 
   #[test]
   fn test_it_works() {
-    let mut evictor = ClockEvictor::new(4);
+    let evictor = ClockEvictor::new(4);
     assert_eq!(evictor.add("1"), (0, None));
     assert_eq!(evictor.add("2"), (1, None));
     assert_eq!(evictor.add("3"), (2, None));
@@ -109,7 +122,7 @@ mod tests {
 
   #[test]
   fn test_hammered_key_never_evicted() {
-    let mut evictor = ClockEvictor::new(4);
+    let evictor = ClockEvictor::new(4);
     assert_eq!(evictor.add(1), (0, None));
     evictor.touch(1); // todo, pathological case where the clock goes full circle!
     assert_eq!(evictor.add(2), (1, None));

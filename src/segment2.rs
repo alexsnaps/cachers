@@ -14,41 +14,41 @@
 
 use crate::eviction::ClockEvictor;
 use crate::eviction::Evictor;
+use crate::softlock::Lock;
 use std;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::ops::Fn;
 
+use std::sync::RwLock;
+
 use futures::future::Future;
 
 pub struct Segment<K, V> {
+  inner: RwLock<Inner<K, V>>,
+}
+
+struct Inner<K, V> {
   data: HashMap<K, CacheEntry<V>>,
   evictor: ClockEvictor<K>,
 }
 
-struct CacheEntry<V> {
-  value: V,
-  index: usize,
-}
-
-impl<K, V> Segment<K, V>
+impl<K, V> Inner<K, V>
 where
   K: std::cmp::Eq + std::hash::Hash + Copy,
   V: Clone,
 {
-  pub fn new(capacity: usize) -> Segment<K, V> {
-    Segment {
-      data: HashMap::new(),
-      evictor: ClockEvictor::new(capacity),
-    }
-  }
-
   pub fn get(&self, key: &K) -> Option<V> {
-    if let Some(cache_entry) = self.data.get(key) {
-      self.evictor.touch(cache_entry.index);
-      return Some(cache_entry.value.clone());
+    match self.data.get(key) {
+      Some(cache_entry) => match cache_entry {
+        CacheEntry::Available(v) => {
+          self.evictor.touch(v.index);
+          return Some(v.value.clone());
+        },
+        CacheEntry::Locked(_) => todo!("fixme"),
+      },
+      None => None,
     }
-    None
   }
 
   pub async fn get_or_populate<Fut, F>(&mut self, key: K, populating_fn: F) -> Fut::Output
@@ -57,20 +57,22 @@ where
     Fut: Future<Output = Option<V>>,
   {
     let (option, key_evicted) = match self.data.entry(key) {
-      Entry::Occupied(entry) => {
-        let cache_entry = entry.get();
-        self.evictor.touch(cache_entry.index);
-        (Some(cache_entry.value.clone()), None)
+      Entry::Occupied(entry) => match entry.get() {
+        CacheEntry::Available(v) => {
+          self.evictor.touch(v.index);
+          (Some(v.value.clone()), None)
+        },
+        CacheEntry::Locked(_) => todo!("fixme"),
       }
       Entry::Vacant(entry) => {
         let (option, to_remove) = match populating_fn(*entry.key()).await {
           Some(value) => {
             let (index, to_remove) = self.evictor.add(entry.key().clone());
-            let cache_entry = entry.insert(CacheEntry {
-              value: value.clone(),
-              index,
-            });
-            (Some(cache_entry.value.clone()), to_remove)
+            let cache_entry = entry.insert(CacheEntry::Available(CacheValue { value, index }));
+            match cache_entry {
+              CacheEntry::Available(v) => (Some(v.value.clone()), to_remove),
+              CacheEntry::Locked(_) => todo!("fixme!"),
+            }
           }
           None => (None, None),
         };
@@ -91,27 +93,33 @@ where
     Fut: Future<Output = Option<V>>,
   {
     let (option, key_evicted) = match self.data.entry(key) {
-      Entry::Occupied(mut entry) => match updating_fn(*entry.key(), Some(entry.get().value.clone())).await {
-        Some(value) => {
-          let cache_entry = entry.get_mut();
-          cache_entry.value = value.clone();
-          self.evictor.touch(cache_entry.index);
-          (Some(cache_entry.value.clone()), None)
-        }
-        None => {
-          entry.remove();
-          (None, None)
+      Entry::Occupied(mut entry) => {
+        let cache_value = match entry.get_mut() {
+          CacheEntry::Available(entry) => entry,
+          CacheEntry::Locked(_) => todo!("fix me!"),
+        };
+
+        match updating_fn(key, Some(cache_value.value.clone())).await {
+          Some(value) => {
+            cache_value.value = value;
+            self.evictor.touch(cache_value.index);
+            (Some(cache_value.value.clone()), None)
+          }
+          None => {
+            entry.remove();
+            (None, None)
+          }
         }
       },
       Entry::Vacant(entry) => {
         let (option, key_evicted) = match updating_fn(*entry.key(), None).await {
           Some(value) => {
             let (index, to_remove) = self.evictor.add(*entry.key());
-            let cache_entry = entry.insert(CacheEntry {
-              value: value.clone(),
-              index,
-            });
-            (Some(cache_entry.value.clone()), to_remove)
+            let cache_entry = entry.insert(CacheEntry::Available(CacheValue { value, index }));
+            match cache_entry {
+              CacheEntry::Available(v) => (Some(v.value.clone()), to_remove),
+              CacheEntry::Locked(_) => todo!("fixme"),
+            }
           }
           None => (None, None),
         };
@@ -128,10 +136,73 @@ where
       None => None,
     }
   }
+}
+
+enum CacheEntry<V> {
+  Available(CacheValue<V>),
+  Locked(Lock<V>),
+}
+
+struct CacheValue<V> {
+  value: V,
+  index: usize,
+}
+
+impl<K, V> Segment<K, V>
+where
+  K: std::cmp::Eq + std::hash::Hash + Copy,
+  V: Clone,
+{
+  pub fn new(capacity: usize) -> Segment<K, V> {
+    Segment {
+      inner: RwLock::new(Inner {
+        data: HashMap::new(),
+        evictor: ClockEvictor::new(capacity),
+      }),
+    }
+  }
+
+  pub fn get(&self, key: &K) -> Option<V> {
+    self.inner.read().unwrap().get(key)
+  }
+
+  pub async fn get_or_populate<Fut, F>(&self, key: K, populating_fn: F) -> Fut::Output
+  where
+    F: Fn(K) -> Fut,
+    Fut: Future<Output = Option<V>>,
+  {
+    // let value = self.inner.read().unwrap().get(key);
+    // match value {
+    //   Some(v) => return v,
+    //   None => {
+    //     let inner = self.inner.write().unwrap();
+    //     // instanciate softlock
+    //     // install softlock (inner.put_if_absent())
+    //     match inner.data.put_if_absent() {
+    //       // si ya rien, create + insert softlock
+    //       // si ya softlock
+    //     }
+    //   },
+    // }
+    // {
+    //   let inner = self.inner.write().unwrap();
+
+    // }
+
+    self.inner.write().unwrap().get_or_populate(key, populating_fn).await
+  }
+
+  pub async fn update<Fut, F>(&self, key: K, updating_fn: F) -> Fut::Output
+  where
+    F: Fn(K, Option<V>) -> Fut,
+    Fut: Future<Output = Option<V>>,
+  {
+    self.inner.write().unwrap().update(key, updating_fn).await
+  }
 
   #[cfg(test)]
   pub fn len(&self) -> usize {
-    self.data.len()
+    self.inner.read().unwrap().data.len()
   }
 }
 
@@ -145,7 +216,7 @@ mod tests {
 
   #[tokio::test]
   async fn hit_populates() {
-    let mut segment: Segment<i32, String> = test_segment();
+    let segment: Segment<i32, String> = test_segment();
     let our_key = 42;
     {
       let value = segment.get_or_populate(our_key, populate).await;
@@ -162,7 +233,7 @@ mod tests {
 
   #[tokio::test]
   async fn miss_populates_not() {
-    let mut segment: Segment<i32, String> = test_segment();
+    let segment: Segment<i32, String> = test_segment();
     let our_key = 42;
     {
       let value = segment.get_or_populate(our_key, miss).await;
@@ -173,7 +244,7 @@ mod tests {
 
   #[tokio::test]
   async fn get_or_populate_evicts() {
-    let mut segment: Segment<i32, String> = test_segment();
+    let segment: Segment<i32, String> = test_segment();
     let our_key = 42;
     {
       let value = segment.get_or_populate(our_key, populate).await;
@@ -189,7 +260,7 @@ mod tests {
 
   #[tokio::test]
   async fn update_populates() {
-    let mut segment: Segment<i32, String> = test_segment();
+    let segment: Segment<i32, String> = test_segment();
     let our_key = 42;
 
     {
@@ -207,7 +278,7 @@ mod tests {
 
   #[tokio::test]
   async fn update_updates() {
-    let mut segment: Segment<i32, String> = test_segment();
+    let segment: Segment<i32, String> = test_segment();
     let our_key = 42;
 
     {
@@ -231,7 +302,7 @@ mod tests {
 
   #[tokio::test]
   async fn update_evicts() {
-    let mut segment: Segment<i32, String> = test_segment();
+    let segment: Segment<i32, String> = test_segment();
     let our_key = 42;
     {
       let value = segment.update(our_key, upsert).await;
@@ -247,7 +318,7 @@ mod tests {
 
   #[tokio::test]
   async fn update_removes() {
-    let mut segment: Segment<i32, String> = test_segment();
+    let segment: Segment<i32, String> = test_segment();
     let our_key = 42;
 
     {

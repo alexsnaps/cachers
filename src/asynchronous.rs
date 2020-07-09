@@ -1,11 +1,10 @@
 use futures::future::Future;
 use std::ops::Fn;
-use std::sync::RwLock;
 
 use crate::segment2::Segment;
 
 pub struct CacheThrough<K, V> {
-  data: RwLock<Segment<K, V>>,
+  data: Segment<K, V>,
 }
 
 impl<K, V> CacheThrough<K, V>
@@ -22,7 +21,7 @@ where
   /// ```
   pub fn new(capacity: usize) -> CacheThrough<K, V> {
     CacheThrough {
-      data: RwLock::new(Segment::new(capacity)),
+      data: Segment::new(capacity),
     }
   }
 
@@ -44,16 +43,11 @@ where
     F: Fn(K) -> Fut,
     Fut: Future<Output = Option<V>>,
   {
-    if let Some(value) = self.data.read().unwrap().get(&key) {
+    if let Some(value) = self.data.get(&key) {
       return Some(value);
     }
 
-    let option = self.data.write();
-    if option.is_ok() {
-      let mut guard = option.unwrap();
-      return guard.get_or_populate(key, populating_fn).await;
-    }
-    None
+    self.data.get_or_populate(key, populating_fn).await
   }
 
   /// Updates an entry in the cache, or populates it if absent.
@@ -69,18 +63,18 @@ where
     F: Fn(K, Option<V>) -> Fut,
     Fut: Future<Output = Option<V>>,
   {
-    self.data.write().unwrap().update(key, updating_fn).await
+    self.data.update(key, updating_fn).await
   }
 
   /// Removes the entry for `key` from the cache.
   /// This is the equivalent of `cache.update(key, |_, _| None)`. Consider this a convenience method.
   pub async fn remove(&self, key: K) {
-    self.data.write().unwrap().update(key, |_, _| async { None }).await;
+    self.data.update(key, |_, _| async { None }).await;
   }
 
   #[cfg(test)]
   fn len(&self) -> usize {
-    self.data.read().unwrap().len()
+    self.data.len()
   }
 }
 
@@ -293,5 +287,75 @@ mod tests {
 
   async fn do_not_invoke(_key: i32) -> Option<String> {
     panic!("I shall not be invoked!");
+  }
+}
+
+#[cfg(all(feature = "unstable", test))]
+mod bench {
+  extern crate test;
+  use std::sync::{Arc, Barrier};
+  use test::Bencher;
+
+  use crate::asynchronous::CacheThrough;
+
+  #[bench]
+  fn get_100_times_no_eviction_two_threads(b: &mut Bencher) {
+    let cache_size: i32 = 1000;
+    let cache: Arc<CacheThrough<i32, String>> = Arc::new(CacheThrough::new(cache_size as usize));
+    let our_key = 42;
+
+    let barrier = Arc::new(Barrier::new(2));
+
+    let other_cache = cache.clone();
+    let other_barrier = barrier.clone();
+
+    let mut rt = tokio::runtime::Builder::new()
+      .threaded_scheduler()
+      .core_threads(2)
+      .max_threads(2)
+      .build()
+      .expect("failed to create runtime.");
+
+    rt.spawn(async move {
+      for warmup in 0..our_key {
+        other_cache
+          .get(warmup, |key| async { None })
+          .await
+          .expect("We had a miss?!");
+      }
+      // let _value = other_cache.get(our_key, |key| Some(key.to_string())); // miss, so populating
+      // for iteration in 0..10000 {
+      //   {
+      //     other_cache.get(our_key, |_| unimplemented!()).expect("We had a miss?!");
+      //     if iteration % 4 == 0 {
+      //       other_cache
+      //         .update(iteration, |key, _| Some(key.to_string()))
+      //         .expect("We had a miss?!");
+      //     } else {
+      //       other_cache
+      //         .get(iteration as i32, |key| Some(key.to_string()))
+      //         .expect("We had a miss?!");
+      //     }
+      //     if iteration == cache_size / 100 {
+      //       barrier.wait(); // let the other thread proceed
+      //     }
+      //   }
+      // }
+    });
+
+
+    // rt.block_on(async {
+
+    // });
+
+
+
+    // other_barrier.wait(); // wait for the other thread to populate
+    // b.iter(|| {
+    //   for _ in 0..100 {
+    //     cache.get(our_key, |_| unimplemented!()).expect("We had a miss?!"); // entry should be there!
+    //   }
+    // });
+    // t.join().unwrap();
   }
 }
