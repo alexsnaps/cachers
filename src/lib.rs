@@ -20,8 +20,8 @@
 //!
 //! ## What's in it?
 //!
-//! It currently only consists of a single `CacheThough` type, that internally uses a `ClockEvictor`
-//! for freeing memory when capacity is reached.
+//! It currently only consists of a single `CacheThough` type, that internally uses a
+//! `ClockEvictionStrategy` for freeing memory when capacity is reached.
 //!
 //! Eventually this will hopefully become a full set of out-of-the-box ready-to-use caching tools
 //!
@@ -250,7 +250,7 @@ mod tests {
     }
 
     {
-      let value = cache.update(our_key, updel);
+      let value = cache.update(our_key, update_delete);
       assert_eq!(value, None);
       assert_eq!(cache.len(), 0);
     }
@@ -353,7 +353,7 @@ mod tests {
     Some(previous.clone() + " updated!")
   }
 
-  fn updel(_key: &i32, value: Option<String>) -> Option<String> {
+  fn update_delete(_key: &i32, value: Option<String>) -> Option<String> {
     assert!(value.is_some());
     None
   }

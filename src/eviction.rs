@@ -15,21 +15,21 @@
 use std::collections::HashMap;
 use std::sync::RwLock;
 
-pub trait Evictor<K> {
+pub trait EvictionStrategy<K> {
   fn add(&mut self, key: K) -> (usize, Option<K>);
   fn touch(&self, index: usize);
 }
 
-pub struct ClockEvictor<K> {
+pub struct ClockEvictionStrategy<K> {
   capacity: usize,
   current_pos: usize,
   clock: RwLock<Vec<bool>>,
   mapping: HashMap<usize, K>,
 }
 
-impl<K> ClockEvictor<K> {
-  pub fn new(capacity: usize) -> ClockEvictor<K> {
-    ClockEvictor {
+impl<K> ClockEvictionStrategy<K> {
+  pub fn new(capacity: usize) -> ClockEvictionStrategy<K> {
+    ClockEvictionStrategy {
       capacity,
       current_pos: 0,
       clock: RwLock::new(vec![false; capacity]),
@@ -61,7 +61,7 @@ impl<K> ClockEvictor<K> {
   }
 }
 
-impl<K> Evictor<K> for ClockEvictor<K> {
+impl<K> EvictionStrategy<K> for ClockEvictionStrategy<K> {
   fn add(&mut self, key: K) -> (usize, Option<K>) {
     let (index, victim) = if self.mapping.len() < self.capacity {
       (self.mapping.len(), None)
@@ -82,44 +82,44 @@ impl<K> Evictor<K> for ClockEvictor<K> {
 
 mod tests {
   #[allow(unused_imports)]
-  use super::{ClockEvictor, Evictor};
+  use super::{ClockEvictionStrategy, EvictionStrategy};
 
   #[test]
   fn test_it_works() {
-    let mut evictor = ClockEvictor::new(4);
-    assert_eq!(evictor.add("1"), (0, None));
-    assert_eq!(evictor.add("2"), (1, None));
-    assert_eq!(evictor.add("3"), (2, None));
-    assert_eq!(evictor.add("4"), (3, None));
-    assert_eq!(evictor.add("5"), (0, Some("1")));
-    assert_eq!(evictor.add("6"), (1, Some("2")));
-    assert_eq!(evictor.add("7"), (2, Some("3")));
-    assert_eq!(evictor.add("8"), (3, Some("4")));
-    assert_eq!(evictor.add("9"), (0, Some("5")));
+    let mut strategy = ClockEvictionStrategy::new(4);
+    assert_eq!(strategy.add("1"), (0, None));
+    assert_eq!(strategy.add("2"), (1, None));
+    assert_eq!(strategy.add("3"), (2, None));
+    assert_eq!(strategy.add("4"), (3, None));
+    assert_eq!(strategy.add("5"), (0, Some("1")));
+    assert_eq!(strategy.add("6"), (1, Some("2")));
+    assert_eq!(strategy.add("7"), (2, Some("3")));
+    assert_eq!(strategy.add("8"), (3, Some("4")));
+    assert_eq!(strategy.add("9"), (0, Some("5")));
 
-    evictor.touch(1);
+    strategy.touch(1);
 
-    assert_eq!(evictor.add("10"), (2, Some("7")));
+    assert_eq!(strategy.add("10"), (2, Some("7")));
 
-    evictor.touch(3);
+    strategy.touch(3);
 
-    assert_eq!(evictor.add("11"), (0, Some("9")));
-    assert_eq!(evictor.add("12"), (1, Some("6")));
+    assert_eq!(strategy.add("11"), (0, Some("9")));
+    assert_eq!(strategy.add("12"), (1, Some("6")));
   }
 
   #[test]
   fn test_hammered_key_never_evicted() {
-    let mut evictor = ClockEvictor::new(4);
-    assert_eq!(evictor.add(1), (0, None));
-    evictor.touch(1); // todo, pathological case where the clock goes full circle!
-    assert_eq!(evictor.add(2), (1, None));
-    evictor.touch(1);
-    assert_eq!(evictor.add(3), (2, None));
-    evictor.touch(1);
-    assert_eq!(evictor.add(4), (3, None));
+    let mut strategy = ClockEvictionStrategy::new(4);
+    assert_eq!(strategy.add(1), (0, None));
+    strategy.touch(1); // todo, pathological case where the clock goes full circle!
+    assert_eq!(strategy.add(2), (1, None));
+    strategy.touch(1);
+    assert_eq!(strategy.add(3), (2, None));
+    strategy.touch(1);
+    assert_eq!(strategy.add(4), (3, None));
     for x in 5..10_000 {
-      evictor.touch(1);
-      assert_ne!(evictor.add(x), (1, Some(2)));
+      strategy.touch(1);
+      assert_ne!(strategy.add(x), (1, Some(2)));
     }
   }
 }

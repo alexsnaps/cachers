@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::eviction::ClockEvictor;
-use crate::eviction::Evictor;
+use crate::eviction::ClockEvictionStrategy;
+use crate::eviction::EvictionStrategy;
 use std;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -21,7 +21,7 @@ use std::ops::Fn;
 
 pub struct Segment<K, V> {
   data: HashMap<K, CacheEntry<V>>,
-  evictor: ClockEvictor<K>,
+  eviction_strategy: ClockEvictionStrategy<K>,
 }
 
 struct CacheEntry<V> {
@@ -37,13 +37,13 @@ where
   pub fn new(capacity: usize) -> Segment<K, V> {
     Segment {
       data: HashMap::new(),
-      evictor: ClockEvictor::new(capacity),
+      eviction_strategy: ClockEvictionStrategy::new(capacity),
     }
   }
 
   pub fn get(&self, key: &K) -> Option<V> {
     if let Some(cache_entry) = self.data.get(key) {
-      self.evictor.touch(cache_entry.index);
+      self.eviction_strategy.touch(cache_entry.index);
       return Some(cache_entry.value.clone());
     }
     None
@@ -56,13 +56,13 @@ where
     let (option, key_evicted) = match self.data.entry(key) {
       Entry::Occupied(entry) => {
         let cache_entry = entry.get();
-        self.evictor.touch(cache_entry.index);
+        self.eviction_strategy.touch(cache_entry.index);
         (Some(cache_entry.value.clone()), None)
       }
       Entry::Vacant(entry) => {
         let (option, to_remove) = match populating_fn(entry.key()) {
           Some(value) => {
-            let (index, to_remove) = self.evictor.add(entry.key().clone());
+            let (index, to_remove) = self.eviction_strategy.add(entry.key().clone());
             let cache_entry = entry.insert(CacheEntry { value, index });
             (Some(cache_entry.value.clone()), to_remove)
           }
@@ -88,7 +88,7 @@ where
         Some(value) => {
           let cache_entry = entry.get_mut();
           cache_entry.value = value;
-          self.evictor.touch(cache_entry.index);
+          self.eviction_strategy.touch(cache_entry.index);
           (Some(cache_entry.value.clone()), None)
         }
         None => {
@@ -99,7 +99,7 @@ where
       Entry::Vacant(entry) => {
         let (option, key_evicted) = match updating_fn(entry.key(), None) {
           Some(value) => {
-            let (index, to_remove) = self.evictor.add(*entry.key());
+            let (index, to_remove) = self.eviction_strategy.add(*entry.key());
             let cache_entry = entry.insert(CacheEntry { value, index });
             (Some(cache_entry.value.clone()), to_remove)
           }
@@ -247,7 +247,7 @@ mod tests {
     }
 
     {
-      let value = segment.update(our_key, updel);
+      let value = segment.update(our_key, update_delete);
       assert_eq!(value, None);
       assert_eq!(segment.len(), 0);
     }
@@ -277,7 +277,7 @@ mod tests {
     Some(previous.clone() + " updated!")
   }
 
-  fn updel(_key: &i32, value: Option<String>) -> Option<String> {
+  fn update_delete(_key: &i32, value: Option<String>) -> Option<String> {
     assert!(value.is_some());
     None
   }

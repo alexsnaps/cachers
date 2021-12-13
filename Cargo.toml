@@ -9,7 +9,7 @@ readme = "README.adoc"
 homepage = "https://gitlab.com/alexsnaps/cachers"
 documentation = "https://docs.rs/cachers"
 description = "A caching library"
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 
