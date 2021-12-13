@@ -124,13 +124,11 @@ where
           let value = populating_fn(&key);
           guard.write(key, value)
         }
-        Some(value) => {
-          Some(value)
-        }
+        Some(value) => Some(value),
       }
     } else {
       None
-    }
+    };
   }
 
   /// Updates an entry in the cache, or populates it if absent.
