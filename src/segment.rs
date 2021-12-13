@@ -35,7 +35,7 @@ where
 {
   pub fn new(capacity: usize) -> Segment<K, V> {
     Segment {
-      data: HashMap::new(),
+      data: HashMap::with_capacity(capacity),
       eviction_strategy: ClockEvictionStrategy::new(capacity),
     }
   }

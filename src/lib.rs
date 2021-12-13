@@ -145,8 +145,7 @@ where
   where
     F: Fn(&K, Option<V>) -> Option<V>,
   {
-    let result = self.data.write();
-    let mut guard = result.unwrap();
+    let mut guard = self.data.write().unwrap();
     let previous_value = guard.get(&key);
     let updated_value = updating_fn(&key, previous_value);
     guard.write(key, updated_value)
