@@ -20,7 +20,7 @@
 //!
 //! ## What's in it?
 //!
-//! It currently only consists of a single `CacheThough` type, that internally uses a
+//! It currently only consists of a single `CacheThrough` type, that internally uses a
 //! `ClockEvictionStrategy` for freeing memory when capacity is reached.
 //!
 //! Eventually this will hopefully become a full set of out-of-the-box ready-to-use caching tools
