@@ -117,11 +117,20 @@ where
       return Some(value);
     }
     let option = self.data.write();
-    if option.is_ok() {
+    return if option.is_ok() {
       let mut guard = option.unwrap();
-      return guard.get_or_populate(key, populating_fn);
+      match guard.get(&key) {
+        None => {
+          let value = populating_fn(&key);
+          guard.write(key, value)
+        }
+        Some(value) => {
+          Some(value)
+        }
+      }
+    } else {
+      None
     }
-    None
   }
 
   /// Updates an entry in the cache, or populates it if absent.
@@ -136,13 +145,17 @@ where
   where
     F: Fn(&K, Option<V>) -> Option<V>,
   {
-    self.data.write().unwrap().update(key, updating_fn)
+    let result = self.data.write();
+    let mut guard = result.unwrap();
+    let previous_value = guard.get(&key);
+    let updated_value = updating_fn(&key, previous_value);
+    guard.write(key, updated_value)
   }
 
   /// Removes the entry for `key` from the cache.
   /// This is the equivalent of `cache.update(key, |_, _| None)`. Consider this a convenience method.
   pub fn remove(&self, key: K) {
-    self.data.write().unwrap().update(key, |_, _| None);
+    self.data.write().unwrap().write(key, None);
   }
 
   #[cfg(test)]

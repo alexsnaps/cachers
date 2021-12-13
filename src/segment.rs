@@ -17,7 +17,6 @@ use crate::eviction::EvictionStrategy;
 use std;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::ops::Fn;
 
 pub struct Segment<K, V> {
   data: HashMap<K, CacheEntry<V>>,
@@ -49,42 +48,9 @@ where
     None
   }
 
-  pub fn get_or_populate<F>(&mut self, key: K, populating_fn: F) -> Option<V>
-  where
-    F: Fn(&K) -> Option<V>,
-  {
+  pub fn write(&mut self, key: K, value: Option<V>) -> Option<V> {
     let (option, key_evicted) = match self.data.entry(key) {
-      Entry::Occupied(entry) => {
-        let cache_entry = entry.get();
-        self.eviction_strategy.touch(cache_entry.index);
-        (Some(cache_entry.value.clone()), None)
-      }
-      Entry::Vacant(entry) => {
-        let (option, to_remove) = match populating_fn(entry.key()) {
-          Some(value) => {
-            let (index, to_remove) = self.eviction_strategy.add(entry.key().clone());
-            let cache_entry = entry.insert(CacheEntry { value, index });
-            (Some(cache_entry.value.clone()), to_remove)
-          }
-          None => (None, None),
-        };
-        (option, to_remove)
-      }
-    };
-
-    if key_evicted.is_some() {
-      self.data.remove(&key_evicted.unwrap());
-    }
-
-    option
-  }
-
-  pub fn update<F>(&mut self, key: K, updating_fn: F) -> Option<V>
-  where
-    F: Fn(&K, Option<V>) -> Option<V>,
-  {
-    let (option, key_evicted) = match self.data.entry(key) {
-      Entry::Occupied(mut entry) => match updating_fn(entry.key(), Some(entry.get().value.clone())) {
+      Entry::Occupied(mut entry) => match value {
         Some(value) => {
           let cache_entry = entry.get_mut();
           cache_entry.value = value;
@@ -97,7 +63,7 @@ where
         }
       },
       Entry::Vacant(entry) => {
-        let (option, key_evicted) = match updating_fn(entry.key(), None) {
+        let (option, key_evicted) = match value {
           Some(value) => {
             let (index, to_remove) = self.eviction_strategy.add(*entry.key());
             let cache_entry = entry.insert(CacheEntry { value, index });
@@ -134,156 +100,38 @@ mod tests {
   }
 
   #[test]
-  fn hit_populates() {
+  fn write_populates() {
     let mut segment: Segment<i32, String> = test_segment();
     let our_key = 42;
-    {
-      let value = segment.get_or_populate(our_key, populate);
-      assert_eq!(value.unwrap(), "42");
-      assert_eq!(segment.len(), 1);
-    }
 
-    {
-      let value = segment.get_or_populate(our_key, do_not_invoke);
-      assert_eq!(value.unwrap(), "42");
-      assert_eq!(segment.len(), 1);
-    }
+    let value = segment.write(our_key, Some(our_key.to_string()));
+    assert_eq!(value.unwrap(), "42");
+    assert_eq!(segment.len(), 1);
   }
 
   #[test]
-  fn miss_populates_not() {
+  fn write_evicts() {
     let mut segment: Segment<i32, String> = test_segment();
     let our_key = 42;
     {
-      let value = segment.get_or_populate(our_key, miss);
-      assert_eq!(value, None);
-      assert_eq!(segment.len(), 0);
-    }
-  }
-
-  #[test]
-  fn get_or_populate_evicts() {
-    let mut segment: Segment<i32, String> = test_segment();
-    let our_key = 42;
-    {
-      let value = segment.get_or_populate(our_key, populate);
+      let value = segment.write(our_key, Some(our_key.to_string()));
       assert_eq!(value.unwrap(), "42");
       assert_eq!(segment.len(), 1);
-      segment.get_or_populate(2, populate);
-      segment.get_or_populate(3, populate);
+      segment.write(2, Some(2.to_string()));
+      segment.write(3, Some(3.to_string()));
       assert_eq!(segment.len(), 3);
-      segment.get_or_populate(4, populate);
+      segment.write(4, Some(4.to_string()));
       assert_eq!(segment.len(), 3);
     }
   }
 
   #[test]
-  fn update_populates() {
+  fn write_removes() {
     let mut segment: Segment<i32, String> = test_segment();
     let our_key = 42;
 
-    {
-      let value = segment.update(our_key, upsert);
-      assert_eq!(value.unwrap(), "42");
-      assert_eq!(segment.len(), 1);
-    }
-
-    {
-      let value = segment.get_or_populate(our_key, do_not_invoke);
-      assert_eq!(value.unwrap(), "42");
-      assert_eq!(segment.len(), 1);
-    }
-  }
-
-  #[test]
-  fn update_updates() {
-    let mut segment: Segment<i32, String> = test_segment();
-    let our_key = 42;
-
-    {
-      let value = segment.get_or_populate(our_key, populate);
-      assert_eq!(value.unwrap(), "42");
-      assert_eq!(segment.len(), 1);
-    }
-
-    {
-      let value = segment.update(our_key, update);
-      assert_eq!(value.unwrap(), "42 updated!");
-      assert_eq!(segment.len(), 1);
-    }
-
-    {
-      let value = segment.get_or_populate(our_key, do_not_invoke);
-      assert_eq!(value.unwrap(), "42 updated!");
-      assert_eq!(segment.len(), 1);
-    }
-  }
-
-  #[test]
-  fn update_evicts() {
-    let mut segment: Segment<i32, String> = test_segment();
-    let our_key = 42;
-    {
-      let value = segment.update(our_key, upsert);
-      assert_eq!(value.unwrap(), "42");
-      assert_eq!(segment.len(), 1);
-      segment.update(2, upsert);
-      segment.update(3, upsert);
-      assert_eq!(segment.len(), 3);
-      segment.update(4, upsert);
-      assert_eq!(segment.len(), 3);
-    }
-  }
-
-  #[test]
-  fn update_removes() {
-    let mut segment: Segment<i32, String> = test_segment();
-    let our_key = 42;
-
-    {
-      let value = segment.get_or_populate(our_key, populate);
-      assert_eq!(value.unwrap(), "42");
-      assert_eq!(segment.len(), 1);
-    }
-
-    {
-      let value = segment.update(our_key, update_delete);
-      assert_eq!(value, None);
-      assert_eq!(segment.len(), 0);
-    }
-
-    {
-      let value = segment.get_or_populate(our_key, miss);
-      assert_eq!(value, None);
-      assert_eq!(segment.len(), 0);
-    }
-  }
-
-  fn miss(_key: &i32) -> Option<String> {
-    None
-  }
-
-  fn populate(key: &i32) -> Option<String> {
-    Some(key.to_string())
-  }
-
-  fn upsert(key: &i32, value: Option<String>) -> Option<String> {
+    let value = segment.write(our_key, None);
     assert_eq!(value, None);
-    populate(key)
-  }
-
-  fn update(_key: &i32, value: Option<String>) -> Option<String> {
-    let previous = &value.unwrap();
-    Some(previous.clone() + " updated!")
-  }
-
-  fn update_delete(_key: &i32, value: Option<String>) -> Option<String> {
-    assert!(value.is_some());
-    None
-  }
-
-  fn do_not_invoke(_key: &i32) -> Option<String> {
-    assert_eq!("", "I shall not be invoked!");
-    None
+    assert_eq!(segment.len(), 0);
   }
 }
