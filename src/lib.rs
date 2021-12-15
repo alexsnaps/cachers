@@ -177,9 +177,10 @@ where
     guard: &mut RwLockWriteGuard<Segment<K, Entry<V>>>,
     new_entry: Option<Entry<V>>,
   ) -> Option<V> {
-    guard.write(key, new_entry).map(|entry| match entry {
+    guard.populate(key, new_entry).map(|entry| match entry {
       Entry::Value(value) => value,
       Entry::Lock(_) => {
+        // todo this can't ever be a Lock, or could it?
         panic!("Handle SoftLock");
       }
     })
@@ -188,7 +189,7 @@ where
   /// Removes the entry for `key` from the cache.
   /// This is the equivalent of `cache.update(key, |_, _| None)`. Consider this a convenience method.
   pub fn remove(&self, key: K) {
-    self.data.write().unwrap().write(key, None);
+    self.data.write().unwrap().populate(key, None);
   }
 
   #[cfg(test)]

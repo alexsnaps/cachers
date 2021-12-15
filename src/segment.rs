@@ -48,7 +48,7 @@ where
     None
   }
 
-  pub fn write(&mut self, key: K, value: Option<V>) -> Option<V> {
+  pub fn populate(&mut self, key: K, value: Option<V>) -> Option<V> {
     let (option, key_evicted) = match self.data.entry(key) {
       Entry::Occupied(mut entry) => match value {
         Some(value) => {
@@ -100,37 +100,37 @@ mod tests {
   }
 
   #[test]
-  fn write_populates() {
+  fn populates() {
     let mut segment: Segment<i32, String> = test_segment();
     let our_key = 42;
 
-    let value = segment.write(our_key, Some(our_key.to_string()));
+    let value = segment.populate(our_key, Some(our_key.to_string()));
     assert_eq!(value.unwrap(), "42");
     assert_eq!(segment.len(), 1);
   }
 
   #[test]
-  fn write_evicts() {
+  fn populate_evicts() {
     let mut segment: Segment<i32, String> = test_segment();
     let our_key = 42;
     {
-      let value = segment.write(our_key, Some(our_key.to_string()));
+      let value = segment.populate(our_key, Some(our_key.to_string()));
       assert_eq!(value.unwrap(), "42");
       assert_eq!(segment.len(), 1);
-      segment.write(2, Some(2.to_string()));
-      segment.write(3, Some(3.to_string()));
+      segment.populate(2, Some(2.to_string()));
+      segment.populate(3, Some(3.to_string()));
       assert_eq!(segment.len(), 3);
-      segment.write(4, Some(4.to_string()));
+      segment.populate(4, Some(4.to_string()));
       assert_eq!(segment.len(), 3);
     }
   }
 
   #[test]
-  fn write_removes() {
+  fn populate_removes() {
     let mut segment: Segment<i32, String> = test_segment();
     let our_key = 42;
 
-    let value = segment.write(our_key, None);
+    let value = segment.populate(our_key, None);
     assert_eq!(value, None);
     assert_eq!(segment.len(), 0);
   }
