@@ -116,7 +116,7 @@ where
     if let Some(entry) = self.data.read().unwrap().get(&key) {
       return match entry {
         Entry::Value(value) => Some(value),
-        Entry::Lock(in_flight) => in_flight.lock.read().unwrap().clone(),
+        Entry::Locked(in_flight) => in_flight.lock.read().unwrap().clone(),
       };
     }
     let option = self.data.write();
@@ -131,7 +131,7 @@ where
           }
           Some(entry) => match entry {
             Entry::Value(value) => Some(value),
-            Entry::Lock(in_flight) => in_flight.lock.read().unwrap().clone(),
+            Entry::Locked(in_flight) => in_flight.lock.read().unwrap().clone(),
           },
         }
       }
@@ -159,7 +159,7 @@ where
       None => None,
       Some(entry) => match entry {
         Entry::Value(value) => Some(value),
-        Entry::Lock(in_flight) => in_flight.lock.read().unwrap().clone(),
+        Entry::Locked(in_flight) => in_flight.lock.read().unwrap().clone(),
       },
     };
     let new_entry = updating_fn(&key, previous_value).map(|value| Entry::Value(value));
@@ -177,7 +177,7 @@ where
       Some(entry) => match entry {
         Entry::Value(value) => Some(value),
         // todo: sort your shit! this can't ever be a Lock, or could it?
-        Entry::Lock(in_flight) => in_flight.lock.read().unwrap().clone(),
+        Entry::Locked(in_flight) => in_flight.lock.read().unwrap().clone(),
       },
     }
   }
@@ -197,7 +197,7 @@ where
 #[derive(Debug, Clone)]
 enum Entry<V> {
   Value(V),
-  Lock(SoftLock<V>),
+  Locked(SoftLock<V>),
 }
 
 #[derive(Debug, Clone)]
