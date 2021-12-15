@@ -34,7 +34,7 @@ mod eviction;
 mod segment;
 
 use std::ops::Fn;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock, RwLockWriteGuard};
 
 use crate::segment::Segment;
 
@@ -75,7 +75,7 @@ use crate::segment::Segment;
 /// t.join().unwrap();
 /// ```
 pub struct CacheThrough<K, V> {
-  data: RwLock<Segment<K, V>>,
+  data: RwLock<Segment<K, Entry<V>>>,
 }
 
 impl<K, V> CacheThrough<K, V>
@@ -113,19 +113,36 @@ where
   where
     F: Fn(&K) -> Option<V>,
   {
-    if let Some(value) = self.data.read().unwrap().get(&key) {
-      return Some(value);
+    if let Some(entry) = self.data.read().unwrap().get(&key) {
+      return match entry {
+        Entry::Value(value) => Some(value),
+        Entry::Lock(_) => {
+          panic!("Handle SoftLock");
+        }
+      };
     }
     let option = self.data.write();
     return if option.is_ok() {
-      let mut guard = option.unwrap();
-      match guard.get(&key) {
-        None => {
-          let value = populating_fn(&key);
-          guard.write(key, value)
+      {
+        let mut guard = option.unwrap();
+        match guard.get(&key) {
+          None => {
+            // todo install softlock
+            let new_entry = populating_fn(&key).map(|value| Entry::Value(value));
+            Self::install_entry(key, &mut guard, new_entry)
+          }
+          Some(entry) => match entry {
+            Entry::Value(value) => {
+              return Some(value);
+            }
+            Entry::Lock(_) => {
+              panic!("Handle SoftLock");
+            }
+          },
         }
-        Some(value) => Some(value),
       }
+      // releasing lock, but...
+      // todo: have thread load value and install in SoftLock
     } else {
       None
     };
@@ -144,9 +161,28 @@ where
     F: Fn(&K, Option<V>) -> Option<V>,
   {
     let mut guard = self.data.write().unwrap();
-    let previous_value = guard.get(&key);
-    let updated_value = updating_fn(&key, previous_value);
-    guard.write(key, updated_value)
+    let previous_value = guard.get(&key).map(|entry| match entry {
+      Entry::Value(value) => value,
+      Entry::Lock(_) => {
+        panic!("Handle SoftLock");
+      }
+    });
+    let new_entry = updating_fn(&key, previous_value).map(|value| Entry::Value(value));
+    Self::install_entry(key, &mut guard, new_entry)
+  }
+
+  // todo: I think this could become an Into instead, and make this cleaner
+  fn install_entry(
+    key: K,
+    guard: &mut RwLockWriteGuard<Segment<K, Entry<V>>>,
+    new_entry: Option<Entry<V>>,
+  ) -> Option<V> {
+    guard.write(key, new_entry).map(|entry| match entry {
+      Entry::Value(value) => value,
+      Entry::Lock(_) => {
+        panic!("Handle SoftLock");
+      }
+    })
   }
 
   /// Removes the entry for `key` from the cache.
@@ -158,6 +194,29 @@ where
   #[cfg(test)]
   fn len(&self) -> usize {
     self.data.read().unwrap().len()
+  }
+}
+
+#[derive(Debug, Clone)]
+enum Entry<V> {
+  Value(V),
+  Lock(SoftLock<V>),
+}
+
+#[derive(Debug, Clone)]
+struct SoftLock<V> {
+  lock: Arc<RwLock<Option<V>>>,
+}
+
+impl<V> SoftLock<V> {
+  pub fn new<K, F>(key: &K, populating_fn: F) -> SoftLock<V>
+  where
+    F: Fn(&K) -> Option<V>,
+  {
+    let lock = Arc::new(RwLock::new(None));
+    let mut guard = lock.write().unwrap();
+    *guard = populating_fn(key);
+    SoftLock { lock: lock.clone() }
   }
 }
 
