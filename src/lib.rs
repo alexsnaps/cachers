@@ -116,9 +116,7 @@ where
     if let Some(entry) = self.data.read().unwrap().get(&key) {
       return match entry {
         Entry::Value(value) => Some(value),
-        Entry::Lock(_) => {
-          panic!("Handle SoftLock");
-        }
+        Entry::Lock(in_flight) => in_flight.lock.read().unwrap().clone(),
       };
     }
     let option = self.data.write();
@@ -132,12 +130,8 @@ where
             Self::install_entry(key, &mut guard, new_entry)
           }
           Some(entry) => match entry {
-            Entry::Value(value) => {
-              return Some(value);
-            }
-            Entry::Lock(_) => {
-              panic!("Handle SoftLock");
-            }
+            Entry::Value(value) => Some(value),
+            Entry::Lock(in_flight) => in_flight.lock.read().unwrap().clone(),
           },
         }
       }
@@ -161,12 +155,13 @@ where
     F: Fn(&K, Option<V>) -> Option<V>,
   {
     let mut guard = self.data.write().unwrap();
-    let previous_value = guard.get(&key).map(|entry| match entry {
-      Entry::Value(value) => value,
-      Entry::Lock(_) => {
-        panic!("Handle SoftLock");
-      }
-    });
+    let previous_value = match guard.get(&key) {
+      None => None,
+      Some(entry) => match entry {
+        Entry::Value(value) => Some(value),
+        Entry::Lock(in_flight) => in_flight.lock.read().unwrap().clone(),
+      },
+    };
     let new_entry = updating_fn(&key, previous_value).map(|value| Entry::Value(value));
     Self::install_entry(key, &mut guard, new_entry)
   }
@@ -177,13 +172,14 @@ where
     guard: &mut RwLockWriteGuard<Segment<K, Entry<V>>>,
     new_entry: Option<Entry<V>>,
   ) -> Option<V> {
-    guard.populate(key, new_entry).map(|entry| match entry {
-      Entry::Value(value) => value,
-      Entry::Lock(_) => {
-        // todo this can't ever be a Lock, or could it?
-        panic!("Handle SoftLock");
-      }
-    })
+    match guard.populate(key, new_entry) {
+      None => None,
+      Some(entry) => match entry {
+        Entry::Value(value) => Some(value),
+        // todo: sort your shit! this can't ever be a Lock, or could it?
+        Entry::Lock(in_flight) => in_flight.lock.read().unwrap().clone(),
+      },
+    }
   }
 
   /// Removes the entry for `key` from the cache.
